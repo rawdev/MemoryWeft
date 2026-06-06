@@ -1,0 +1,205 @@
+# Prompt Guide
+
+MCP gives the LLM a set of tools. **Whether they get used well depends on
+what the LLM was told.** This guide is the prompt that turns MWeft from
+"a tool that exists" into "a tool the LLM reaches for."
+
+Drop the snippet below into your `CLAUDE.md`, `GEMINI.md`, or `.cursorrules`.
+Adjust to taste.
+
+## Contents
+- [The snippet](#the-snippet)
+- [Why these heuristics](#why-these-heuristics)
+- [The `hint` and `reason` tags](#the-hint-and-reason-tags)
+- [Save discipline](#save-discipline)
+- [Gotchas](#gotchas)
+
+## The snippet
+
+Copy this into your CLAUDE.md / GEMINI.md / .cursorrules:
+
+````markdown
+## MWeft memory
+
+You have access to a graph-based memory called MWeft. Use it to recall
+prior context before you grep the filesystem or guess.
+
+### Search path
+
+1. Default to `mweft_search(query="<core terms>", mode="hybrid", top_k=5)`.
+   Hybrid is semantic and crosses naming variants — prefer it for
+   conceptual or ambiguous queries.
+2. Use `mweft_entity_lookup(name)` only for precise entity enumeration.
+   It is substring match — try camelCase and spaced variants
+   (`PlanNode` and `plan node`) since fragmented names get missed.
+3. Use `mweft_sql_query` for exact counts and table facts
+   ("how many X?", "does table Y have rows?"). SELECT/WITH only.
+4. Sort results by `created_at` (or `timestamp`), newest first;
+   on conflict prefer the newest.
+
+### Recency questions ("latest / most recent")
+
+A term-anchored search can miss the latest content if the topic was
+*renamed*. Before answering "what's the most recent X?":
+
+- Run a term-agnostic sweep with `mweft_sql_query`:
+  `SELECT * FROM events ORDER BY created_at DESC LIMIT 20`
+- Reconcile with the term search. If the term search's newest hit is
+  older than the sweep's, a successor concept likely exists — follow it
+  through `connections.similar` or `hint.entities`.
+
+### Reading the `hint` block
+
+`mweft_search` returns a `hint` connection map alongside flat `hits`.
+Read both — the hint tells you *why* hits surfaced and which neighbors
+to follow up.
+
+Per-hit `reason` tags (fixed vocabulary, categorical — judge by tag, not
+by score):
+
+- `similar-embedding` — semantically near a query concept; a likely
+  **rename / synonym**. For "latest / most recent / related" questions,
+  the answer may live under that renamed concept — follow it.
+- `contents-chain` — adjacent document chunk (same doc, prev/next).
+- `closed-jaccard` — entity/group footprint overlap inside the hit set.
+- `co-occurrence` — 1-hop entity neighbors.
+- `shared-context` — same ContextGroup.
+- `shared-category` — same user-defined category/group.
+- `spanning-entity` — an entity that appears in ≥2 hits in the result.
+
+`hint.threads` / `entities` / `context_groups` / `categories` are
+cross-hit connection maps — use them to pivot to a related cluster
+without spawning extra tool calls.
+
+### Save path
+
+On an explicit `mw save` / `mweft save` / `memoryweft save` from the
+user, call `mweft_remember`:
+
+```python
+mweft_remember(
+    summary="<1–2 line summary>",
+    entities=[{"name": "...", "type": "person|concept|component|..."}, ...],
+    tag="<topic tag>",   # see below
+    # working_folder defaults from K2G_USER_MEMORY_SAVE_GROUP env
+    content="<original conversation excerpt>",  # ⚠️ ALWAYS LAST — long content can truncate the arg right after it
+)
+```
+
+Picking `tag`:
+
+- Use a short topic path: `"work"`, or `"work/auth"` for a sub-topic.
+- Match against existing tags in the previous `mweft_remember`
+  response's `tag_tree`. Reuse the closest fit. Create a new
+  tag only when nothing fits — this prevents fragmenting tags
+  into near-duplicates.
+- On the first save of a session, propose your best tag from the
+  conversation topic. The response confirms the resolved `tag` plus
+  the full `tag_tree` for later saves.
+
+After the save, surface what was recorded:
+
+> Saved to tag **work/auth**. Recorded as Alice (person, new),
+> Bob (person, existing). Tell me if any entity is a hallucination or
+> the tag is off.
+
+If the user flags a hallucination:
+`mweft_remember_edit(event_id=<from response>, remove_entities=["Bob"])`
+
+### Recommend a save when
+
+Append a single line at the end of a response when:
+
+- A design decision / agreement was reached ("let's go with that")
+- A conclusion after a long discussion (≥3 turns + resolution)
+- Hard-to-reproduce info surfaced (root cause / non-obvious fact)
+- Intent / rationale ("why") that won't survive in code
+
+> 💾 Worth saving with `mw save` — <one-line reason>
+
+Don't suggest on every turn (cap 1–2 per session) and don't auto-call
+`mweft_remember` without user consent.
+
+### Hard prohibitions
+
+- Do NOT call `mweft_remember` on bare "remember this" / "save". The
+  `mw` prefix is required.
+- Do NOT interpret "summarize this" as a save request — produce only
+  your own summary.
+````
+
+## Why these heuristics
+
+### Hybrid search first
+
+MWeft's `mweft_search` mixes event and entity matches and returns
+connection neighbors in one shot. Pure entity lookup is brittle when
+naming varies (`PlanNode` vs `plan node` vs `plan_node`) — hybrid
+crosses that via embedding similarity.
+
+### Recency sweep before term-anchored search
+
+Memory naturally drifts: a concept gets renamed, deprecated, or
+absorbed into a successor. Term-anchored search anchors on the *old*
+name and misses the latest version. A term-agnostic recency sweep
+(`ORDER BY created_at DESC`) reveals successors, which you then verify
+against the term search via `connections.similar` (rename bridge).
+
+### Tags with reuse
+
+`tag` is how saves are clustered into navigable buckets later.
+Two different LLMs trying to save the same kind of conversation
+shouldn't produce `work-auth` and `auth/work` and `authentication` —
+that fragments the index. The `tag_tree` response field exists
+specifically to enable reuse-or-create discipline.
+
+## The `hint` and `reason` tags
+
+The hint surface is what makes MWeft *navigable* without N extra tool
+calls. Two layers:
+
+| Layer | What it tells you |
+|---|---|
+| Per-hit `reason: list[str]` | *Why* this hit surfaced — semantic match, neighbor in graph, sibling in document, member of a cluster |
+| Top-level `hint` | Cross-hit aggregates — threads (sequential chains), entities spanning multiple hits, shared context groups, shared categories |
+
+The cardinal rule: **tags are categorical**. No score, no threshold.
+Don't try to rank or filter by hint count — *act* on the presence of a
+tag. If a hit has `similar-embedding`, that's a rename signal, follow it.
+
+## Save discipline
+
+The save model assumes the LLM does NER (extracts `entities`) at the
+moment of saving and lets MWeft do the rest (vector, graph edges, group
+membership, tag placement). The LLM has more context than the
+storage layer, so the LLM is the right place to do extraction.
+
+Two failure modes to avoid:
+
+1. **Hallucinated entities.** If the conversation didn't establish a
+   thing as a real entity (a person's name, a concrete component, a
+   defined concept), don't invent one. Better to record fewer entities
+   than to pollute the graph with fictional ones. MWeft's edit tool
+   exists to recover from this, but prevention is cheaper.
+2. **Wrong save trigger.** Don't auto-save after every response. Only
+   save on explicit user signal (`mw save`). Suggest a save when a
+   conversation has *produced something durable* — a decision, a root
+   cause, an agreement — not after each task completion.
+
+## Gotchas
+
+- **Domain casing.** The save domain comes from
+  `K2G_USER_MEMORY_SAVE_DOMAIN`. The *value* is case-sensitive: `K2G` and
+  `k2g` end up in different domain buckets. Pick one and stick with it.
+- **SQLite boolean columns.** Some columns return as `"f"` / `"t"`
+  strings, not `0`/`1`. `WHERE deprecated = 0` may silently drop rows —
+  use `WHERE deprecated IN (0, 'f', 'false')` or omit the filter.
+- **`mweft_sql_query` is read-only.** SELECT / WITH only. DDL and DML
+  are blocked. Use it for exploration, not for mutation.
+- **One in-progress task at a time.** If you're building todos for a
+  multi-step session, keep one in-progress task and move on as they
+  complete — this matches MWeft's recording model where each turn is a
+  complete-able unit.
+- **The `mw` prefix.** A bare "save this" / "remember" doesn't trigger
+  save — the prefix `mw` (or `mweft` / `memoryweft`) is the explicit
+  signal. This prevents auto-save from chatter.

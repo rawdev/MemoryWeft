@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "mweft": {
+      "command": "k2g-mcp",
+      "args": [],
+      "env": {
+        "K2G_DOTENV_FILE": ""
+      }
+    }
+  }
+}

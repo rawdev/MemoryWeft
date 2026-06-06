@@ -1,0 +1,96 @@
+[project]
+name = "mweft"
+version = "0.1.0"
+description = "Local-first graph memory for MCP — events as vector-bearing edges"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+readme = "README.md"
+authors = [{ name = "MWeft Contributors" }]
+
+# Core — minimal runtime for SQLite + MCP stdio. Heavy / optional backends
+# (Postgres, local PyTorch embeddings, training extras) live in extras.
+dependencies = [
+    "mcp>=1.0.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0",
+    "numpy>=1.24.0",
+    "sqlite-vec>=0.1.0",
+    "httpx>=0.27",
+    # Community detection (Leiden over the entity graph). Required by the
+    # mweft_auto_tag_* MCP tools and BP-94 ingestion-driven community build —
+    # imported unguarded (no networkx fallback), so they are core, not optional.
+    # Prebuilt wheels on PyPI (C/C++ ext, no local build toolchain needed).
+    "python-igraph>=0.11",
+    "leidenalg>=0.10",
+]
+
+[project.optional-dependencies]
+# Alternative graph + vector backend (PostgreSQL + pgvector).
+postgres = [
+    "psycopg2-binary>=2.9.0",
+    "pgvector>=0.3.0,<0.5.0",
+]
+# Local PyTorch-based embedding (sentence-transformers / BGE-M3 in process).
+embed-local = [
+    "sentence-transformers>=2.2.0",
+    "torch>=2.0.0",
+]
+# Local ONNX embedding — no torch, CPU onnxruntime + tokenizers. The default
+# embedding backend for portable zip distributions (unsigned extract-and-run
+# installs). Point EMBEDDING_ONNX_PATH at the BGE-M3 ONNX model (bundled or
+# downloaded).
+embed-onnx = [
+    "onnxruntime>=1.17.0",
+    "tokenizers>=0.15.0",
+]
+# Manager UI — the native desktop app (`mweft-app`, pywebview, no socket). It
+# runs the per-project FastAPI app in-process (httpx ASGI bridge) inside a native
+# window. fastapi/uvicorn are pulled in by the per-project app factory it reuses.
+# The portable zip installs `mweft[embed-onnx,manager]`.
+manager = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pywebview>=5.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+# Entry point names keep the legacy ``k2g-`` prefix while the package is
+# still ``k2g``. A rebrand to ``mweft-mcp`` will land together with the
+# package rename — see Open Issues in docs/.
+k2g-mcp = "k2g.mcp.__main__:main"               # MCP stdio server
+# Manager UI — native desktop app (pywebview, no socket). Wraps the per-project
+# FastAPI app in-process. (Web-server launchers mweft-ui / mweft-ui-project are
+# K2G-internal and not shipped in OSS — the app version is the supported UI.)
+mweft-app = "k2g.desktop.cli:main"              # Manager desktop app
+mweft-init = "k2g.cli.init:main"                # Project init
+# LLM-free document ingestion (load documents into memory without the build pipeline)
+k2g-ingest-manifest = "k2g.cli.ingest_manifest:main"
+k2g-manifest-check = "k2g.cli.manifest_check:main"
+# Data portability
+mweft-export = "k2g.portable.cli:export_main"
+mweft-import = "k2g.portable.cli:import_main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/k2g"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/k2g"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B"]
+ignore = ["E501"]

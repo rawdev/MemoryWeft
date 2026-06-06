@@ -1,0 +1,56 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install (core + postgres + manager + dev)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[postgres,manager,dev]"
+
+      # Advisory for now: the codebase carries legacy lint debt (pep8-naming /
+      # import-order across many modules). Keep visible in CI logs without
+      # failing the build until a dedicated `ruff check --fix` cleanup lands.
+      - name: Lint (ruff, advisory)
+        continue-on-error: true
+        run: ruff check src
+
+      # The package ships no test suite yet; verify every console-script entry
+      # point imports cleanly (catches accidental cross-module leakage / syntax
+      # errors). Replace with `pytest` once an OSS test suite lands.
+      - name: Import smoke (entry points)
+        run: |
+          python - <<'PY'
+          import importlib
+          mods = [
+              "k2g.mcp.__main__",
+              "k2g.desktop.cli",
+              "k2g.ui_project.cli",
+              "k2g.web.app",
+              "k2g.cli.init",
+              "k2g.cli.ingest_manifest",
+              "k2g.cli.manifest_check",
+              "k2g.portable.cli",
+          ]
+          for m in mods:
+              importlib.import_module(m)
+              print("ok", m)
+          PY
+
+      - name: Run tests (if present)
+        run: |
+          if [ -d tests ]; then pytest -q; else echo "no tests/ dir — skipped"; fi

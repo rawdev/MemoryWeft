@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>MemoryWeft</title>
+<!-- Desktop (no-HTTP) fetch bridge — must load before app.js; no-op in the browser. -->
+<script src="desktop-bridge.js"></script>
+<style>
+  :root { --bg:#f4f6f8; --panel:#fff; --line:#e5e7eb; --ink:#1f2937; --muted:#6b7280;
+          --accent:#2563eb; --accent-soft:#e0e7ff; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         margin: 0; height: 100vh; display: flex; flex-direction: column;
+         background: var(--bg); color: var(--ink); }
+
+  /* App bar */
+  .appbar { display: flex; align-items: center; gap: 12px; padding: 10px 18px;
+            background: #111827; color: #fff; }
+  .appbar .brand { font-weight: 700; font-size: 15px; letter-spacing: .2px; }
+  .appbar .sp { flex: 1; }
+  .appbar label { font-size: 12px; color: #cbd5e1; }
+  .appbar select { padding: 5px 8px; border-radius: 6px; border: 1px solid #374151;
+                   background: #1f2937; color: #fff; font-size: 13px; min-width: 160px; }
+
+  /* Tab nav */
+  nav.tabs { display: flex; gap: 2px; padding: 0 14px; background: #fff; border-bottom: 1px solid var(--line); }
+  nav.tabs button { border: none; background: none; padding: 11px 16px; font-size: 13.5px;
+                    color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; }
+  nav.tabs button:hover { color: var(--ink); }
+  nav.tabs button.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
+  /* Content area */
+  #content { flex: 1; overflow: auto; padding: 18px; min-height: 0; }
+  .page { max-width: 1500px; }
+  .page.wide { max-width: none; }
+  .page > h2 { font-size: 18px; margin: 0 0 4px 0; }
+  .page > .lede { color: var(--muted); font-size: 13px; margin: 0 0 16px 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+          padding: 14px 16px; margin-bottom: 14px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .card h3 { margin: 0 0 10px 0; font-size: 14px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+  /* Project manager — accordion rows (click a row to expand its setup inline) */
+  .pr-item { border-bottom: 1px solid var(--line); }
+  .pr-item:last-child { border-bottom: none; }
+  .pr-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 6px;
+            cursor: pointer; border-radius: 6px; }
+  .pr-row:hover { background: #f8fafc; }
+  .pr-row.expanded { background: #f1f5f9; }
+  .pr-caret { display: inline-block; color: var(--muted); font-size: 11px;
+              transition: transform .15s ease; }
+  .pr-row.expanded .pr-caret { transform: rotate(90deg); }
+  .pr-setup-slot { padding: 12px 14px; margin: 0 2px 8px;
+                   border-left: 3px solid var(--accent); background: #fafbfc;
+                   border-radius: 0 6px 6px 0; }
+  .muted { color: var(--muted); font-size: 12px; }
+  button { padding: 5px 12px; cursor: pointer; border: 1px solid var(--line); border-radius: 6px;
+           background: #fff; font-size: 13px; }
+  button:hover { background: #f3f4f6; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.primary:hover { filter: brightness(1.05); }
+  input[type=text], input[type=date], input[type=number], select { padding: 5px 8px;
+           border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; }
+  .event-item { border-bottom: 1px solid #f0f0f0; padding: 6px 0; font-size: 13px; line-height: 1.45; }
+  pre { font-size: 11px; background: #f5f5f5; padding: 8px; overflow-x: auto; border-radius: 6px; }
+
+  /* Domain summary — non-clickable tag chip */
+  .ds-tag { display: inline-block; background: var(--accent-soft); color: #3730a3;
+            border-radius: 10px; padding: 1px 8px; font-size: 11px; margin: 3px 4px 0 0; }
+  .ds-sum { margin: 2px 0; }
+
+  /* Sub-tabs (within a page) */
+  .subtabs { display: flex; gap: 4px; margin-bottom: 12px; }
+  .subtabs button { border-radius: 16px; padding: 4px 14px; }
+  .subtabs button.on { background: var(--accent-soft); color: #3730a3; border-color: #c7d2fe; }
+
+
+  /* fsBrowser modal */
+  .fsb-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+                  display: flex; align-items: center; justify-content: center; z-index: 1000; }
+  .fsb-modal { background: #fff; width: 560px; max-height: 80vh; border-radius: 6px;
+               box-shadow: 0 8px 28px rgba(0,0,0,0.25); display: flex; flex-direction: column; }
+  .fsb-head { padding: 10px 12px; border-bottom: 1px solid #eee;
+              display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .fsb-head input { flex: 1; }
+  .fsb-list { flex: 1; overflow-y: auto; padding: 6px 0; }
+  .fsb-row { display: flex; align-items: center; gap: 6px; padding: 5px 12px; cursor: pointer; font-size: 13px; }
+  .fsb-row:hover { background: #f0f4ff; }
+  .fsb-row .icon { width: 18px; text-align: center; }
+  .fsb-row .name { flex: 1; }
+  .fsb-row .size { color: #999; font-size: 11px; }
+  .fsb-actions { padding: 8px 12px; border-top: 1px solid #eee;
+                 display: flex; gap: 6px; justify-content: flex-end; }
+
+  /* Spinner — small inline loader for busy buttons / empty states */
+  .sx-spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #cbd5e1;
+                border-top-color: var(--accent); border-radius: 50%; vertical-align: middle;
+                margin-right: 6px; animation: sx-spin .8s linear infinite; }
+  @keyframes sx-spin { to { transform: rotate(360deg); } }
+  button.busy { opacity: 0.7; cursor: progress; }
+  button.busy::before { content: ""; display: inline-block; width: 10px; height: 10px;
+                        border: 2px solid #fff; border-top-color: transparent; border-radius: 50%;
+                        margin-right: 6px; vertical-align: middle; animation: sx-spin .8s linear infinite; }
+
+  /* Search drill lanes + shared list/chip system */
+  .sx-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+  .sx-seg { display: inline-flex; border: 1px solid #d1d5db; border-radius: 6px; overflow: hidden; }
+  .sx-seg button { border: none; border-radius: 0; background: #fff; padding: 5px 12px; }
+  .sx-seg button.on { background: var(--accent); color: #fff; }
+  .sx-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .sx-chip { display: inline-flex; align-items: center; gap: 4px; background: var(--accent-soft); color: #3730a3;
+             border-radius: 12px; padding: 2px 9px; font-size: 12px; cursor: pointer; }
+  .sx-chip:hover { background: #c7d2fe; }
+  .sx-lanes { display: flex; gap: 0; overflow-x: auto; align-items: stretch; min-height: 420px; }
+  .sx-col { flex: 0 0 380px; border: 1px solid var(--line); border-radius: 10px; background: #fff;
+            display: flex; flex-direction: column; box-shadow: 0 1px 2px rgba(0,0,0,.05); overflow: hidden; max-height: 70vh; }
+  /* Splitter between drill-down lanes — drag to widen the previous column. */
+  .sx-lane-split { flex: 0 0 10px; cursor: col-resize; position: relative; background: transparent; }
+  .sx-lane-split::after { content: ""; position: absolute; left: 50%; top: 14px; bottom: 14px;
+                          width: 2px; background: var(--line); transform: translateX(-50%);
+                          border-radius: 1px; transition: background 0.1s, width 0.1s; }
+  .sx-lane-split:hover::after, .sx-lane-split.dragging::after { background: var(--accent); width: 3px; }
+  .sx-col-h { padding: 8px 10px; border-bottom: 1px solid #eee; font-weight: 600; font-size: 13px; background: #f8fafc; }
+  .sx-sub-h { padding: 6px 10px; font-size: 11px; color: var(--muted); background: #fbfbfb; border-bottom: 1px solid #f0f0f0; }
+  .sx-list { overflow-y: auto; flex: 1; }
+  .sx-row { padding: 7px 10px; border-bottom: 1px solid #f3f4f6; cursor: pointer; font-size: 13px;
+            display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .sx-row:hover { background: #eff6ff; }
+  .sx-row.sel { background: #dbeafe; }
+  .sx-row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sx-row .n { color: var(--accent); font-variant-numeric: tabular-nums; font-size: 12px; flex: 0 0 auto; }
+  .sx-row .meta { color: #9ca3af; font-size: 11px; }
+  .sx-empty { padding: 10px; color: #9ca3af; font-size: 12px; }
+
+  /* Predefine 3-column workspace — resizable splitter */
+  .pd-cols { display: grid; align-items: stretch; min-height: 60vh;
+             grid-template-columns: 1fr 8px 1.4fr 8px 1.4fr; }
+  .pd-cols .sx-col { min-width: 160px; }
+  .pd-split { background: transparent; cursor: col-resize; position: relative; }
+  .pd-split::after { content: ""; position: absolute; left: 50%; top: 12px; bottom: 12px;
+                     width: 2px; background: var(--line); transform: translateX(-50%);
+                     border-radius: 1px; transition: background 0.1s; }
+  .pd-split:hover::after, .pd-split.dragging::after { background: var(--accent); width: 3px; }
+
+  /* Sortable list header */
+  .pd-sort-h { display: flex; gap: 6px; padding: 6px 10px; font-size: 11px;
+               background: #fbfbfb; border-bottom: 1px solid #f0f0f0; color: var(--muted); }
+  .pd-sort-h button { flex: 0 0 auto; border: 1px solid transparent; background: transparent;
+                      padding: 2px 8px; font-size: 11px; color: var(--muted); border-radius: 4px; }
+  .pd-sort-h button:hover { background: #f3f4f6; color: var(--ink); }
+  .pd-sort-h button.on { color: var(--accent); border-color: #c7d2fe; background: var(--accent-soft); }
+  .pd-sort-h .grow { flex: 1; }
+
+  /* Influence chip in the entity list */
+  .pd-row { display: flex; align-items: center; gap: 6px; padding: 5px 10px;
+            border-bottom: 1px solid #f3f4f6; font-size: 13px; }
+  .pd-row:hover { background: #eff6ff; }
+  .pd-row .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pd-row .infl { font-variant-numeric: tabular-nums; font-size: 11px; color: var(--muted);
+                  flex: 0 0 auto; min-width: 32px; text-align: right; }
+  .pd-row .act { flex: 0 0 auto; }
+  .pd-row .act button { padding: 1px 6px; font-size: 11px; }
+
+  /* Tag tree node */
+  .pd-tag-node { padding: 4px 10px 4px 0; font-size: 13px; border-bottom: 1px solid #f3f4f6;
+                 display: flex; align-items: center; gap: 4px; }
+  .pd-tag-node:hover { background: #eff6ff; }
+  .pd-tag-toggle { width: 16px; flex: 0 0 auto; cursor: pointer; user-select: none;
+                   color: var(--muted); text-align: center; font-size: 10px; }
+  .pd-tag-toggle.leaf { color: transparent; cursor: default; }
+
+  /* Combobox (Alias/Canonical search-style dropdown) */
+  .pd-cmb { position: relative; display: inline-block; }
+  .pd-cmb input { width: 200px; padding-right: 22px; }
+  .pd-cmb-clear { position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+                  border: none; background: transparent; color: var(--muted); cursor: pointer;
+                  padding: 0 4px; font-size: 14px; }
+  .pd-cmb-list { position: absolute; left: 0; right: 0; top: 100%; z-index: 30;
+                 max-height: 260px; overflow-y: auto; background: #fff; border: 1px solid #d1d5db;
+                 border-radius: 6px; margin-top: 2px; box-shadow: 0 4px 12px rgba(0,0,0,.12);
+                 display: none; }
+  .pd-cmb-list.open { display: block; }
+  .pd-cmb-list .opt { padding: 6px 10px; cursor: pointer; font-size: 13px; }
+  .pd-cmb-list .opt:hover, .pd-cmb-list .opt.kbd { background: #eff6ff; }
+  .pd-cmb-list .opt .pth { color: var(--muted); font-size: 11px; }
+</style>
+</head>
+<body>
+<header class="appbar">
+  <span class="brand" data-i18n="appbar.brand">MemoryWeft Manager</span>
+  <span class="sp"></span>
+  <span id="project-badge" data-i18n="appbar.projectChecking" style="font-size:13px; color:#cbd5e1;">Checking project…</span>
+</header>
+<nav class="tabs">
+  <button data-tab="intro" data-i18n="nav.intro" onclick="showTab('intro')">Intro</button>
+  <button data-tab="summary" data-i18n="nav.summary" onclick="showTab('summary')">Domain Summary</button>
+  <button data-tab="predefine" data-i18n="nav.predefine" onclick="showTab('predefine')">Edit</button>
+  <button data-tab="search" data-i18n="nav.search" onclick="showTab('search')">Search</button>
+  <button data-tab="analysis" data-i18n="nav.analysis" onclick="showTab('analysis')">Analysis</button>
+  <button data-tab="settings" data-i18n="nav.settings" onclick="showTab('settings')">Settings</button>
+  <button data-tab="notice" data-i18n="nav.notice" onclick="showTab('notice')">Notice</button>
+</nav>
+<main id="content"></main>
+<script src="app.js"></script>
+</body>
+</html>

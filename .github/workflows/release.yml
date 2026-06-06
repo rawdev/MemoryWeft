@@ -1,0 +1,78 @@
+name: release
+
+# Build the portable zips on a version tag and attach them to the GitHub
+# Release. Artifacts are NOT committed to the repo — they live as release
+# assets. Tag like `v0.1.0` (keep pyproject `version` in sync with the tag).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write   # required to create/update the Release and upload assets
+
+jobs:
+  # Export the ONNX model once (platform-independent) and share it.
+  model:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Install export deps (build-time only)
+        run: pip install "optimum[onnxruntime]" transformers torch
+      - name: Export BGE-M3 to ONNX (int8)
+        run: python scripts/mweft_export_bge_onnx.py --out models/bge-m3-onnx --quantize --verify
+      - name: Share the model with the build jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: bge-m3-onnx
+          path: models/bge-m3-onnx
+          retention-days: 1
+
+  # Per-OS portable zip. Offline mode bundles a locally built wheel + its
+  # platform deps, so it works before `mweft` is published to PyPI.
+  portable:
+    needs: model
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win-x64
+          - os: macos-14
+            platform: mac-arm64
+          - os: macos-13
+            platform: mac-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Get the model
+        uses: actions/download-artifact@v4
+        with:
+          name: bge-m3-onnx
+          path: models/bge-m3-onnx
+      - name: Build the mweft wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel
+      - name: Build the portable zip (offline; bundles local wheel + model)
+        run: >
+          python packaging/portable/build_portable.py
+          --platform ${{ matrix.platform }}
+          --version ${{ needs.model.outputs.version }}
+          --model-dir models/bge-m3-onnx
+          --mode offline
+          --wheels-from dist
+      - name: Attach to the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/mweft-${{ matrix.platform }}-${{ needs.model.outputs.version }}.zip
+          fail_on_unmatched_files: true

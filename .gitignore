@@ -1,0 +1,38 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Env / secrets
+.env
+.env.*
+*.mwf
+
+# MCP client configs (generated per-project)
+.mcp.json
+.mcp.*.json
+
+# Local data / models (never commit)
+data/
+data_*/
+models/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Editors / tools
+.vscode/
+.cursor/
+.claude/
+.idea/
+.DS_Store

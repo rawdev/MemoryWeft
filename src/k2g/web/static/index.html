@@ -1,0 +1,1110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>K2G Vector2Text Agent</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #1a1a2e; color: #e0e0e0; height: 100vh; display: flex; flex-direction: column; }
+a { color: #64b5f6; cursor: pointer; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Header */
+.header { background: #16213e; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #0f3460; }
+.header h1 { font-size: 18px; color: #e94560; }
+.header select { background: #0f3460; color: #e0e0e0; border: 1px solid #533483; padding: 5px 10px; border-radius: 4px; font-size: 14px; }
+
+/* Tabs */
+.tabs { background: #16213e; display: flex; border-bottom: 1px solid #0f3460; }
+.tab { padding: 10px 20px; cursor: pointer; color: #888; border-bottom: 2px solid transparent; transition: all 0.2s; }
+.tab:hover { color: #e0e0e0; }
+.tab.active { color: #e94560; border-bottom-color: #e94560; }
+
+/* Main content */
+.main { flex: 1; display: flex; overflow: hidden; }
+.panel-left { width: 45%; border-right: 1px solid #0f3460; overflow-y: auto; padding: 15px; }
+.panel-right { width: 55%; overflow-y: auto; padding: 15px; }
+
+/* Form elements */
+input[type="text"], textarea { width: 100%; background: #0f3460; border: 1px solid #533483; color: #e0e0e0; padding: 8px 12px; border-radius: 4px; font-size: 14px; }
+textarea { resize: vertical; min-height: 60px; }
+input[type="text"]:focus, textarea:focus { outline: none; border-color: #e94560; }
+button { background: #e94560; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+button:hover { background: #c73e54; }
+button:disabled { background: #555; cursor: not-allowed; }
+button.secondary { background: #533483; }
+button.secondary:hover { background: #6a4c9c; }
+button.small { padding: 4px 10px; font-size: 12px; }
+button.danger { background: #c0392b; }
+button.danger:hover { background: #e74c3c; }
+
+/* Cards */
+.card { background: #16213e; border: 1px solid #0f3460; border-radius: 6px; padding: 12px; margin-bottom: 10px; cursor: pointer; transition: border-color 0.2s; }
+.card:hover { border-color: #e94560; }
+.card.active { border-color: #e94560; background: #1a2744; }
+.card .score { color: #e94560; font-weight: bold; font-size: 13px; }
+.card .summary { font-size: 14px; margin-top: 4px; }
+.card .meta { font-size: 12px; color: #888; margin-top: 4px; }
+.card .entities-tags { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* Tags */
+.tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+.tag.entity { background: #1b4332; color: #95d5b2; }
+.tag.group { background: #3d1f00; color: #ffb74d; }
+.tag.deleted { opacity: 0.5; text-decoration: line-through; }
+.tag.user-created { border: 1px dashed #64b5f6; }
+
+/* Section */
+.section { margin-bottom: 20px; }
+.section-title { font-size: 14px; font-weight: bold; color: #e94560; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #0f3460; }
+
+/* Original text */
+.original-text { background: #0f1a2e; border: 1px solid #0f3460; border-radius: 4px; padding: 12px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; max-height: 300px; overflow-y: auto; }
+
+/* Preset buttons */
+.preset-group { display: flex; gap: 6px; margin: 8px 0; }
+.preset-btn { background: #0f3460; border: 1px solid #533483; color: #e0e0e0; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+.preset-btn.active { background: #e94560; border-color: #e94560; }
+.preset-btn:hover { border-color: #e94560; }
+
+/* Entity validation */
+.entity-check { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #0f3460; }
+.entity-check .name { flex: 1; font-size: 13px; }
+.entity-check .status { font-size: 11px; }
+.entity-check .status.exists { color: #95d5b2; }
+.entity-check .status.new { color: #ffb74d; }
+.entity-check select { background: #0f3460; color: #e0e0e0; border: 1px solid #533483; padding: 3px 6px; border-radius: 3px; font-size: 12px; }
+
+/* Navigation */
+.nav-buttons { display: flex; justify-content: space-between; margin: 10px 0; }
+
+/* Status bar */
+.statusbar { background: #0f3460; padding: 6px 20px; font-size: 12px; color: #888; display: flex; gap: 20px; border-top: 1px solid #16213e; }
+
+/* Tree */
+.tree-item { padding: 4px 0; }
+.tree-item .toggle { cursor: pointer; color: #888; margin-right: 4px; }
+.tree-children { padding-left: 20px; }
+
+/* Loading */
+.loading { text-align: center; padding: 20px; color: #888; }
+
+/* Pagination */
+.pagination { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; }
+
+/* Toast */
+.toast { position: fixed; bottom: 60px; right: 20px; background: #2d6a4f; color: white; padding: 10px 20px; border-radius: 6px; font-size: 13px; z-index: 100; display: none; }
+.toast.error { background: #c0392b; }
+
+/* Empty state */
+.empty { text-align: center; padding: 40px; color: #666; }
+
+/* Persona / Vibe */
+.persona-card { background: #1a2744; border: 1px solid #533483; border-radius: 6px; padding: 12px; margin-bottom: 10px; }
+.persona-card .persona-title { font-size: 13px; font-weight: bold; color: #bb86fc; margin-bottom: 6px; }
+.persona-card .persona-summary { font-size: 12px; color: #aaa; margin-top: 6px; }
+.persona-tag { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; background: #4a1a6b; color: #ce93d8; margin: 2px; cursor: default; }
+.persona-tag.editable { cursor: pointer; border: 1px dashed #bb86fc; }
+.persona-tag .remove { margin-left: 4px; cursor: pointer; color: #e94560; font-weight: bold; }
+.vibe-tag { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; background: #1b3a4b; color: #4fc3f7; margin: 2px; }
+.vibe-tag .remove { margin-left: 4px; cursor: pointer; color: #e94560; font-weight: bold; }
+.tension-bar { height: 8px; border-radius: 4px; background: #0f3460; margin: 4px 0; overflow: hidden; }
+.tension-bar .fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
+.tension-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; }
+.pv-slot { background: #0f1a2e; border: 1px solid #0f3460; border-radius: 4px; padding: 8px; margin: 6px 0; }
+.pv-slot .slot-title { font-size: 12px; color: #888; margin-bottom: 4px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>K2G Vector2Text Agent</h1>
+  <div>
+    <label>Domain: </label>
+    <select id="domainSelect" onchange="onDomainChange()">
+      <option value="">Loading...</option>
+    </select>
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('search')">Search</div>
+  <div class="tab" onclick="switchTab('entity')">Entity</div>
+  <div class="tab" onclick="switchTab('group')">Group</div>
+  <div class="tab" onclick="switchTab('control')">Control</div>
+  <div class="tab" onclick="switchTab('settings')">Settings</div>
+</div>
+
+<div class="main">
+  <div class="panel-left" id="panelLeft"></div>
+  <div class="panel-right" id="panelRight">
+    <div class="empty">Select an item from the left panel.</div>
+  </div>
+</div>
+
+<div class="statusbar" id="statusbar">
+  <span id="statEntities">Entity: -</span>
+  <span id="statEvents">Event: -</span>
+  <span id="statGroups">Group: -</span>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// =====================================================================
+// State
+// =====================================================================
+let currentTab = 'search';
+let currentDomain = localStorage.getItem('k2g_domain') || '';
+let currentEventId = null;
+let entityPage = 1;
+const entitySize = 50;
+let includeDeleted = false;
+
+// =====================================================================
+// API helpers
+// =====================================================================
+const API = '/api';
+
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(API + path, opts);
+  return res.json();
+}
+
+// =====================================================================
+// Toast
+// =====================================================================
+function showToast(msg, isError) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast' + (isError ? ' error' : '');
+  t.style.display = 'block';
+  setTimeout(() => { t.style.display = 'none'; }, 3000);
+}
+
+// =====================================================================
+// Domain
+// =====================================================================
+async function loadDomains() {
+  const data = await api('GET', '/domains');
+  const sel = document.getElementById('domainSelect');
+  sel.innerHTML = '';
+  if (data.domains && data.domains.length > 0) {
+    data.domains.forEach(d => {
+      const opt = document.createElement('option');
+      opt.value = d; opt.textContent = d;
+      if (d === currentDomain) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    if (!currentDomain || !data.domains.includes(currentDomain)) {
+      currentDomain = data.domains[0];
+      sel.value = currentDomain;
+      localStorage.setItem('k2g_domain', currentDomain);
+    }
+  } else {
+    sel.innerHTML = '<option value="">No domains</option>';
+  }
+  refreshTab();
+  loadStats();
+}
+
+function onDomainChange() {
+  currentDomain = document.getElementById('domainSelect').value;
+  localStorage.setItem('k2g_domain', currentDomain);
+  refreshTab();
+  loadStats();
+}
+
+async function loadStats() {
+  if (!currentDomain) return;
+  // Use entity/group counts from list APIs
+  try {
+    const ed = await api('GET', `/entities?domain=${encodeURIComponent(currentDomain)}&size=1`);
+    document.getElementById('statEntities').textContent = `Entity: ${ed.total || 0}`;
+
+    const gd = await api('GET', `/groups?domain=${encodeURIComponent(currentDomain)}`);
+    const countGroups = (gs) => gs.reduce((n, g) => n + 1 + countGroups(g.children || []), 0);
+    document.getElementById('statGroups').textContent = `Group: ${countGroups(gd.groups || [])}`;
+
+    document.getElementById('statEvents').textContent = 'Event: -';
+  } catch (e) { /* ignore */ }
+}
+
+// =====================================================================
+// Tabs
+// =====================================================================
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    t.classList.toggle('active', ['search','entity','group','control','settings'][i] === tab);
+  });
+  refreshTab();
+}
+
+function refreshTab() {
+  const left = document.getElementById('panelLeft');
+  const right = document.getElementById('panelRight');
+  right.innerHTML = '<div class="empty">Select an item from the left panel.</div>';
+
+  if (currentTab === 'search') renderSearchPanel(left);
+  else if (currentTab === 'entity') renderEntityPanel(left);
+  else if (currentTab === 'group') renderGroupPanel(left);
+  else if (currentTab === 'control') renderControlPanel(left);
+  else if (currentTab === 'settings') renderSettingsPanel(left);
+}
+
+// =====================================================================
+// Search Tab
+// =====================================================================
+function renderSearchPanel(el) {
+  el.innerHTML = `
+    <div class="section">
+      <input type="text" id="searchInput" placeholder="Enter search query..." onkeydown="if(event.key==='Enter')doSearch()">
+      <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+        <button onclick="doSearch()">Search</button>
+        <label style="font-size:12px;">
+          <input type="checkbox" id="searchIncDel" ${includeDeleted?'checked':''} onchange="includeDeleted=this.checked"> Include deleted
+        </label>
+      </div>
+    </div>
+    <div id="searchResults"><div class="empty">Enter a search query.</div></div>
+  `;
+}
+
+async function doSearch() {
+  const query = document.getElementById('searchInput').value.trim();
+  if (!query) return;
+  const container = document.getElementById('searchResults');
+  container.innerHTML = '<div class="loading">Searching...</div>';
+
+  const data = await api('POST', '/search', {
+    query, domain: currentDomain, limit: 20,
+    score_threshold: 0.2, include_deleted: includeDeleted
+  });
+
+  if (data.error) { container.innerHTML = `<div class="empty">${data.error}</div>`; return; }
+  if (!data.results || data.results.length === 0) {
+    container.innerHTML = '<div class="empty">No results</div>'; return;
+  }
+
+  container.innerHTML = data.results.map(r => `
+    <div class="card" onclick="loadEvent('${r.event_id}')">
+      <div class="score">${(r.score * 100).toFixed(1)}%</div>
+      <div class="summary">${esc(r.summary || r.event_id)}</div>
+      <div class="meta">${esc(r.timestamp || '')} ${r.groups.length ? '| ' + r.groups.join(', ') : ''}</div>
+      <div class="entities-tags">
+        ${(r.entities||[]).map(e => `<span class="tag entity ${e.user_tag==='user_deleted'?'deleted':''}">${esc(e.name)}</span>`).join('')}
+      </div>
+    </div>
+  `).join('');
+}
+
+// =====================================================================
+// Entity Tab
+// =====================================================================
+function renderEntityPanel(el) {
+  el.innerHTML = `
+    <div class="section">
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <button class="small" onclick="showAddEntity()">+ Add Entity</button>
+        <label style="font-size:12px;display:flex;align-items:center;gap:4px;">
+          <input type="checkbox" id="entIncDel" ${includeDeleted?'checked':''} onchange="includeDeleted=this.checked;loadEntities()"> Include deleted
+        </label>
+      </div>
+      <div id="addEntityForm" style="display:none;margin-bottom:10px;">
+        <input type="text" id="newEntityName" placeholder="Entity name">
+        <div style="margin-top:4px;display:flex;gap:4px;">
+          <button class="small" onclick="addEntity()">Add</button>
+          <button class="small secondary" onclick="document.getElementById('addEntityForm').style.display='none'">Cancel</button>
+        </div>
+      </div>
+    </div>
+    <div id="entityList"><div class="loading">Loading...</div></div>
+    <div id="entityPagination" class="pagination"></div>
+  `;
+  entityPage = 1;
+  loadEntities();
+}
+
+function showAddEntity() { document.getElementById('addEntityForm').style.display = 'block'; }
+
+async function addEntity() {
+  const name = document.getElementById('newEntityName').value.trim();
+  if (!name) return;
+  await api('POST', '/entities', { name, domain: currentDomain });
+  showToast(`Entity "${name}" added`);
+  document.getElementById('addEntityForm').style.display = 'none';
+  loadEntities();
+  loadStats();
+}
+
+async function loadEntities() {
+  const container = document.getElementById('entityList');
+  container.innerHTML = '<div class="loading">Loading...</div>';
+
+  const data = await api('GET', `/entities?domain=${encodeURIComponent(currentDomain)}&page=${entityPage}&size=${entitySize}&include_deleted=${includeDeleted}`);
+
+  if (!data.entities || data.entities.length === 0) {
+    container.innerHTML = '<div class="empty">No entities</div>'; return;
+  }
+
+  container.innerHTML = data.entities.map(e => `
+    <div class="card ${e.user_tag==='user_deleted'?'':''}">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span style="${e.user_tag==='user_deleted'?'text-decoration:line-through;opacity:0.5;':''}cursor:pointer;" onclick="loadEntityEvents('${e.id}','${esc(e.name)}')">${esc(e.name)}</span>
+        <span class="meta">Event: ${e.event_count || 0}${e.user_tag ? ' | ' + e.user_tag : ''}</span>
+      </div>
+      <div style="margin-top:4px;display:flex;gap:4px;">
+        ${e.user_tag === 'user_deleted'
+          ? `<button class="small secondary" onclick="tagEntity('${e.id}',null);event.stopPropagation();">Restore</button>`
+          : `<button class="small danger" onclick="tagEntity('${e.id}','user_deleted');event.stopPropagation();">Delete</button>`
+        }
+      </div>
+    </div>
+  `).join('');
+
+  // Pagination
+  const totalPages = Math.ceil((data.total || 0) / entitySize);
+  document.getElementById('entityPagination').innerHTML = totalPages > 1
+    ? `<button class="small secondary" ${entityPage<=1?'disabled':''} onclick="entityPage--;loadEntities()">Prev</button>
+       <span>${entityPage} / ${totalPages}</span>
+       <button class="small secondary" ${entityPage>=totalPages?'disabled':''} onclick="entityPage++;loadEntities()">Next</button>`
+    : '';
+}
+
+async function tagEntity(entityId, tag) {
+  await api('POST', `/entities/${entityId}/tag`, { user_tag: tag });
+  showToast(tag ? 'Marked as deleted' : 'Restored');
+  loadEntities();
+  loadStats();
+}
+
+async function loadEntityEvents(entityId, entityName) {
+  const right = document.getElementById('panelRight');
+  right.innerHTML = '<div class="loading">Loading...</div>';
+
+  const data = await api('GET', `/entities/${entityId}/events?size=50`);
+  if (data.error) { right.innerHTML = `<div class="empty">${data.error}</div>`; return; }
+
+  right.innerHTML = `
+    <div class="section">
+      <div class="section-title">Entity: ${esc(entityName || data.entity?.name || entityId)}</div>
+      <div class="meta">${data.total || 0} events total</div>
+    </div>
+    <div id="personaContainer"></div>
+    <div id="tensionContainer"></div>
+    <div>
+      ${(data.events||[]).map(ev => `
+        <div class="card" onclick="loadEvent('${ev.id}')">
+          <div class="summary">${esc(ev.summary || ev.id)}</div>
+          <div class="meta">#${ev.order_index} | ${esc(ev.timestamp||'')}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+
+  // Load persona card
+  loadPersonaCard(entityId, entityName || data.entity?.name || entityId, document.getElementById('personaContainer'));
+
+  // Tension scores with related entities (async)
+  const relatedEntities = (data.events || [])
+    .flatMap(ev => ev.entities || [])
+    .filter(e => e.id !== entityId)
+    .filter((e, i, arr) => arr.findIndex(x => x.id === e.id) === i)
+    .slice(0, 5);
+  loadTensionScores(entityId, relatedEntities, document.getElementById('tensionContainer'));
+}
+
+// =====================================================================
+// Group Tab
+// =====================================================================
+function renderGroupPanel(el) {
+  el.innerHTML = `
+    <div class="section">
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <button class="small" onclick="showAddGroup()">+ Add Group</button>
+      </div>
+      <div id="addGroupForm" style="display:none;margin-bottom:10px;">
+        <input type="text" id="newGroupName" placeholder="Group name" style="margin-bottom:4px;">
+        <select id="newGroupParent" style="width:100%;background:#0f3460;color:#e0e0e0;border:1px solid #533483;padding:5px;border-radius:4px;margin-bottom:4px;">
+          <option value="">No parent (root)</option>
+        </select>
+        <div style="display:flex;gap:4px;">
+          <button class="small" onclick="addGroup()">Add</button>
+          <button class="small secondary" onclick="document.getElementById('addGroupForm').style.display='none'">Cancel</button>
+        </div>
+      </div>
+    </div>
+    <div id="groupTree"><div class="loading">Loading...</div></div>
+  `;
+  loadGroups();
+}
+
+function showAddGroup() {
+  document.getElementById('addGroupForm').style.display = 'block';
+}
+
+async function addGroup() {
+  const name = document.getElementById('newGroupName').value.trim();
+  const parentId = document.getElementById('newGroupParent').value || null;
+  if (!name) return;
+  await api('POST', '/groups', { name, domain: currentDomain, parent_group_id: parentId });
+  showToast(`Group "${name}" added`);
+  document.getElementById('addGroupForm').style.display = 'none';
+  loadGroups();
+  loadStats();
+}
+
+async function loadGroups() {
+  const container = document.getElementById('groupTree');
+  container.innerHTML = '<div class="loading">Loading...</div>';
+
+  const data = await api('GET', `/groups?domain=${encodeURIComponent(currentDomain)}`);
+  if (!data.groups || data.groups.length === 0) {
+    container.innerHTML = '<div class="empty">No groups</div>'; return;
+  }
+
+  // Update parent select as well
+  const parentSel = document.getElementById('newGroupParent');
+  if (parentSel) {
+    parentSel.innerHTML = '<option value="">No parent (root)</option>';
+    const flattenGroups = (gs, prefix) => {
+      gs.forEach(g => {
+        const opt = document.createElement('option');
+        opt.value = g.id; opt.textContent = prefix + g.name;
+        parentSel.appendChild(opt);
+        flattenGroups(g.children || [], prefix + '  ');
+      });
+    };
+    flattenGroups(data.groups, '');
+  }
+
+  container.innerHTML = renderGroupTree(data.groups);
+}
+
+function renderGroupTree(groups) {
+  if (!groups || groups.length === 0) return '';
+  return groups.map(g => {
+    const hasChildren = g.children && g.children.length > 0;
+    const deleted = g.user_tag === 'user_deleted';
+    return `
+      <div class="tree-item">
+        <div style="display:flex;align-items:center;gap:6px;${deleted?'opacity:0.5;text-decoration:line-through;':''}">
+          ${hasChildren ? `<span class="toggle" onclick="this.parentElement.nextElementSibling.style.display=this.parentElement.nextElementSibling.style.display==='none'?'block':'none';this.textContent=this.textContent==='▸'?'▾':'▸'">▾</span>` : '<span style="width:12px;display:inline-block;"></span>'}
+          <a onclick="loadGroupEvents('${g.id}','${esc(g.name)}')">${esc(g.name)}</a>
+          <span class="meta">L${g.level}</span>
+          ${deleted
+            ? `<button class="small secondary" onclick="tagGroup('${g.id}',null);event.stopPropagation();">Restore</button>`
+            : `<button class="small danger" onclick="tagGroup('${g.id}','user_deleted');event.stopPropagation();">Delete</button>`
+          }
+        </div>
+        ${hasChildren ? `<div class="tree-children">${renderGroupTree(g.children)}</div>` : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+async function tagGroup(groupId, tag) {
+  await api('POST', `/groups/${groupId}/tag`, { user_tag: tag });
+  showToast(tag ? 'Marked as deleted' : 'Restored');
+  loadGroups();
+}
+
+async function loadGroupEvents(groupId, groupName) {
+  const right = document.getElementById('panelRight');
+  right.innerHTML = '<div class="loading">Loading...</div>';
+
+  const data = await api('GET', `/groups/${groupId}/events?size=50`);
+
+  right.innerHTML = `
+    <div class="section">
+      <div class="section-title">Group: ${esc(groupName)}</div>
+      <div class="meta">${data.total || 0} events total</div>
+    </div>
+    <div>
+      ${(data.events||[]).map(ev => `
+        <div class="card" onclick="loadEvent('${ev.id}')">
+          <div class="summary">${esc(ev.summary || ev.id)}</div>
+          <div class="meta">#${ev.order_index} | ${esc(ev.timestamp||'')}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+// =====================================================================
+// Event Detail
+// =====================================================================
+async function loadEvent(eventId) {
+  currentEventId = eventId;
+  const right = document.getElementById('panelRight');
+  right.innerHTML = '<div class="loading">Loading...</div>';
+
+  const data = await api('GET', `/events/${eventId}`);
+  if (data.error) { right.innerHTML = `<div class="empty">${data.error}</div>`; return; }
+
+  const ev = data.event || {};
+
+  right.innerHTML = `
+    <div class="section">
+      <div class="section-title">Event Detail</div>
+      <div class="meta">${esc(ev.domain||'')} | #${ev.order_index ?? ''} | ${esc(ev.timestamp||'')}</div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Summary</div>
+      <div style="font-size:14px;">${esc(data.summary || '(none)')}</div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Original Text</div>
+      <div class="original-text">${esc(data.original_text || '(none)')}</div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Participating Entities</div>
+      <div class="entities-tags">
+        ${(data.entities||[]).map(e => `<span class="tag entity ${e.user_tag==='user_deleted'?'deleted':''} ${e.user_tag==='user_created'?'user-created':''}">${esc(e.name)}</span>`).join('')}
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Member Groups</div>
+      <div class="entities-tags">
+        ${(data.groups||[]).map(g => `<span class="tag group ${g.user_tag==='user_deleted'?'deleted':''}">${esc(g.name)}</span>`).join('')}
+      </div>
+    </div>
+
+    <div class="nav-buttons">
+      ${data.prev_event ? `<button class="secondary" onclick="loadEvent('${data.prev_event.id}')">◀ Prev</button>` : '<span></span>'}
+      ${data.next_event ? `<button class="secondary" onclick="loadEvent('${data.next_event.id}')">Next ▶</button>` : '<span></span>'}
+    </div>
+
+    <hr style="border-color:#0f3460;margin:15px 0;">
+
+    <div class="section">
+      <div class="section-title">Generate Event</div>
+      <div style="margin-bottom:8px;">
+        <label style="font-size:12px;color:#888;">Guardrail:</label>
+        <select id="guardrailSelect" style="width:100%;background:#0f3460;color:#e0e0e0;border:1px solid #533483;padding:5px;border-radius:4px;font-size:13px;">
+          <option value="">None</option>
+        </select>
+      </div>
+      <textarea id="genCondition" placeholder="Enter condition (e.g. What if the southeast wind had not blown)"></textarea>
+      <div class="preset-group">
+        <span class="preset-btn" data-preset="conservative" onclick="selectPreset(this)">Conservative</span>
+        <span class="preset-btn active" data-preset="balanced" onclick="selectPreset(this)">Balanced</span>
+        <span class="preset-btn" data-preset="creative" onclick="selectPreset(this)">Creative</span>
+        <span class="preset-btn" data-preset="verbose" onclick="selectPreset(this)">Verbose</span>
+      </div>
+      ${renderPVSlots()}
+      <button onclick="generateEvent('${eventId}')">Generate</button>
+    </div>
+
+    <div id="generateResult"></div>
+  `;
+
+  // Populate guardrail dropdown
+  loadGuardrailOptions();
+}
+
+let selectedPreset = 'balanced';
+function selectPreset(btn) {
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  selectedPreset = btn.dataset.preset;
+}
+
+async function loadGuardrailOptions() {
+  const sel = document.getElementById('guardrailSelect');
+  if (!sel || !currentDomain) return;
+  try {
+    const data = await api('GET', `/control-nodes?domain=${encodeURIComponent(currentDomain)}`);
+    const nodes = data.control_nodes || [];
+    nodes.forEach(cn => {
+      const opt = document.createElement('option');
+      opt.value = cn.id;
+      opt.textContent = `${cn.name || cn.id} (${cn.stage}, ${cn.member_count_own}ev)`;
+      sel.appendChild(opt);
+    });
+  } catch (e) { /* ignore */ }
+}
+
+// =====================================================================
+// Generate
+// =====================================================================
+async function generateEvent(baseEventId) {
+  const condition = document.getElementById('genCondition').value.trim();
+  if (!condition) { showToast('Please enter a condition.', true); return; }
+
+  const container = document.getElementById('generateResult');
+  container.innerHTML = '<div class="loading">Generating...</div>';
+
+  const guardrailSel = document.getElementById('guardrailSelect');
+  const controlNodeId = guardrailSel ? guardrailSel.value : '';
+
+  const genBody = {
+    base_event_id: baseEventId,
+    condition: condition,
+    domain: currentDomain,
+    style_preset: selectedPreset,
+    control_node_id: controlNodeId || undefined,
+  };
+  if (pendingPersonaConstraints.length > 0) genBody.persona_constraints = pendingPersonaConstraints;
+  if (pendingVibeConstraints.length > 0) genBody.vibe_constraints = pendingVibeConstraints;
+
+  const data = await api('POST', '/generate', genBody);
+
+  if (data.error) { container.innerHTML = `<div class="empty">${data.error}</div>`; return; }
+
+  const gen = data.generated || {};
+  const detectedEntities = data.detected_entities || [];
+
+  container.innerHTML = `
+    <div class="section">
+      <div class="section-title">Original Text (for reference)</div>
+      <div class="original-text">${esc(data.original_text || '(none)')}</div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Generated Text</div>
+      <div class="original-text" style="border-color:#2d6a4f;">${esc(gen.text || '')}</div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Entity Validation</div>
+      <div id="entityValidation">
+        ${detectedEntities.map((e, i) => `
+          <div class="entity-check">
+            <span class="name">${esc(e.name)}</span>
+            <span class="status ${e.exists ? 'exists' : 'new'}">${e.exists ? 'Existing' : 'New'}</span>
+            <select id="entAction_${i}" data-name="${esc(e.name)}">
+              <option value="link" ${e.exists ? 'selected' : ''}>Link (link)</option>
+              <option value="create" ${!e.exists ? 'selected' : ''}>Create (create)</option>
+              <option value="skip">Exclude (skip)</option>
+            </select>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+
+    <button onclick="reingestEvent()" style="margin-top:10px;">Save to K2G</button>
+  `;
+
+  // Store data for reingest
+  window._pendingReingest = {
+    text: gen.text,
+    base_event_id: gen.base_event_id,
+    condition: gen.condition,
+    domain: currentDomain,
+    entityCount: detectedEntities.length,
+    applied_constraints: data.applied_constraints || {},
+  };
+}
+
+async function reingestEvent() {
+  const pending = window._pendingReingest;
+  if (!pending) { showToast('No generated event found.', true); return; }
+
+  const entities = [];
+  for (let i = 0; i < pending.entityCount; i++) {
+    const sel = document.getElementById(`entAction_${i}`);
+    if (sel) {
+      entities.push({ name: sel.dataset.name, action: sel.value });
+    }
+  }
+
+  const container = document.getElementById('generateResult');
+  container.innerHTML = '<div class="loading">Saving...</div>';
+
+  const reingestBody = {
+    text: pending.text,
+    base_event_id: pending.base_event_id,
+    condition: pending.condition,
+    domain: pending.domain,
+    entities: entities,
+    user_created: true,
+  };
+  if (pending.applied_constraints && Object.keys(pending.applied_constraints).length > 0) {
+    reingestBody.applied_constraints = pending.applied_constraints;
+  }
+
+  const data = await api('POST', '/generate/reingest', reingestBody);
+
+  if (data.success) {
+    showToast(data.message || 'Event saved!');
+    container.innerHTML = `
+      <div class="section">
+        <div class="section-title">Saved</div>
+        <div>Event ID: <a onclick="loadEvent('${data.event_id}')">${data.event_id}</a></div>
+        ${(data.created_entities||[]).map(e => `<div class="tag entity user-created">${esc(e.name)} (new)</div>`).join('')}
+      </div>
+    `;
+    loadStats();
+  } else {
+    showToast(data.error || 'Save failed', true);
+    container.innerHTML = `<div class="empty">${data.error || 'Save failed'}</div>`;
+  }
+}
+
+// =====================================================================
+// Control Tab
+// =====================================================================
+let controlNodes = [];
+
+function renderControlPanel(el) {
+  el.innerHTML = `
+    <div class="section">
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <button class="small" onclick="autoBuildControlNodes()">Auto-build</button>
+        <label style="font-size:12px;display:flex;align-items:center;gap:4px;">
+          <input type="checkbox" id="ctrlIncSeed" onchange="loadControlNodes(this.checked)"> Include seed
+        </label>
+      </div>
+    </div>
+    <div id="controlList"><div class="loading">Loading...</div></div>
+  `;
+  loadControlNodes(false);
+}
+
+async function loadControlNodes(includeSeed) {
+  const container = document.getElementById('controlList');
+  if (!container) return;
+  container.innerHTML = '<div class="loading">Loading...</div>';
+
+  const data = await api('GET', `/control-nodes?domain=${encodeURIComponent(currentDomain)}&include_seed=${!!includeSeed}`);
+  controlNodes = data.control_nodes || [];
+
+  if (controlNodes.length === 0) {
+    container.innerHTML = '<div class="empty">No control nodes</div>'; return;
+  }
+
+  container.innerHTML = controlNodes.map(cn => `
+    <div class="card" onclick="loadControlNodeDetail('${cn.id}')">
+      <div style="display:flex;justify-content:space-between;">
+        <span style="font-weight:bold;">${esc(cn.name || cn.id)}</span>
+        <span class="tag group">${esc(cn.stage)}</span>
+      </div>
+      <div class="meta">Events: ${cn.member_count_own || 0} | order: ${cn.order_index ?? '-'}</div>
+      ${cn.narrative_summary ? `<div class="summary" style="margin-top:4px;font-size:12px;color:#aaa;">${esc(cn.narrative_summary.substring(0, 100))}...</div>` : ''}
+    </div>
+  `).join('');
+}
+
+async function loadControlNodeDetail(nodeId) {
+  const right = document.getElementById('panelRight');
+  right.innerHTML = '<div class="loading">Loading...</div>';
+
+  const [detail, evData] = await Promise.all([
+    api('GET', `/control-nodes/${nodeId}`),
+    api('GET', `/control-nodes/${nodeId}/events`),
+  ]);
+
+  if (detail.error) { right.innerHTML = `<div class="empty">${detail.error}</div>`; return; }
+
+  const cn = detail.control_node || {};
+  const events = evData.events || [];
+  const summary = evData.narrative_summary || cn.narrative_summary || '';
+  const children = cn.children || [];
+
+  right.innerHTML = `
+    <div class="section">
+      <div class="section-title">Control Node: ${esc(cn.name || cn.id)}</div>
+      <div class="meta">Stage: ${esc(cn.stage)} | Domain: ${esc(cn.domain || '')} | Events: ${cn.member_count_own || 0}</div>
+    </div>
+
+    ${summary ? `
+    <div class="section">
+      <div class="section-title">Narrative Summary</div>
+      <div class="original-text">${esc(summary)}</div>
+    </div>` : ''}
+
+    <div class="section">
+      <div class="section-title">Event Sequence (${events.length})</div>
+      <div>
+        ${events.map((ev, i) => `
+          <div class="card" onclick="loadEvent('${ev.id}')">
+            <div class="summary">${i+1}. ${esc(ev.summary || ev.id)}</div>
+            <div class="meta">#${ev.order_index ?? ''} | ${esc(ev.timestamp || '')}</div>
+          </div>
+        `).join('')}
+        ${events.length === 0 ? '<div class="empty">No linked events</div>' : ''}
+      </div>
+    </div>
+
+    ${children.length > 0 ? `
+    <div class="section">
+      <div class="section-title">Child Control Nodes (${children.length})</div>
+      ${children.map(ch => `
+        <div class="card" onclick="loadControlNodeDetail('${ch.id}')">
+          <span style="font-weight:bold;">${esc(ch.name || ch.id)}</span>
+          <span class="tag group">${esc(ch.stage)}</span>
+        </div>
+      `).join('')}
+    </div>` : ''}
+  `;
+}
+
+async function autoBuildControlNodes() {
+  if (!currentDomain) { showToast('Please select a domain.', true); return; }
+  const container = document.getElementById('controlList');
+  if (container) container.innerHTML = '<div class="loading">Auto-building...</div>';
+
+  const data = await api('POST', '/control-nodes/auto-build', { domain: currentDomain });
+  if (data.error) {
+    showToast(data.error, true);
+  } else {
+    showToast(data.message || `${data.count} node(s) generated`);
+  }
+  loadControlNodes(false);
+}
+
+// =====================================================================
+// Settings Tab
+// =====================================================================
+function renderSettingsPanel(el) {
+  el.innerHTML = `
+    <div class="section">
+      <div class="section-title">Settings</div>
+      <div style="margin-bottom:10px;">
+        <label style="font-size:13px;">
+          <input type="checkbox" ${includeDeleted?'checked':''} onchange="includeDeleted=this.checked">
+          Include deleted items (global)
+        </label>
+      </div>
+      <div style="font-size:12px;color:#888;">
+        <p>K2G Vector2Text Agent v0.1.0</p>
+        <p>Current domain: ${currentDomain || '(none)'}</p>
+      </div>
+    </div>
+  `;
+  document.getElementById('panelRight').innerHTML = '<div class="empty">Settings</div>';
+}
+
+// =====================================================================
+// Utilities
+// =====================================================================
+function esc(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+
+// =====================================================================
+// Persona / Vibe Cache (localStorage)
+// =====================================================================
+const PERSONA_CACHE_KEY = 'k2g_persona_cache';
+const VIBE_CACHE_KEY = 'k2g_vibe_cache';
+
+function getPersonaCache(domain, entityId) {
+  try {
+    const cache = JSON.parse(localStorage.getItem(PERSONA_CACHE_KEY) || '{}');
+    return (cache[domain] || {})[entityId] || null;
+  } catch { return null; }
+}
+
+function setPersonaCache(domain, entityId, data) {
+  try {
+    const cache = JSON.parse(localStorage.getItem(PERSONA_CACHE_KEY) || '{}');
+    if (!cache[domain]) cache[domain] = {};
+    cache[domain][entityId] = { ...data, cached_at: Date.now() };
+    localStorage.setItem(PERSONA_CACHE_KEY, JSON.stringify(cache));
+  } catch { /* ignore */ }
+}
+
+function getVibeCache(domain, segmentKey) {
+  try {
+    const cache = JSON.parse(localStorage.getItem(VIBE_CACHE_KEY) || '{}');
+    return (cache[domain] || {})[segmentKey] || null;
+  } catch { return null; }
+}
+
+function setVibeCache(domain, segmentKey, data) {
+  try {
+    const cache = JSON.parse(localStorage.getItem(VIBE_CACHE_KEY) || '{}');
+    if (!cache[domain]) cache[domain] = {};
+    cache[domain][segmentKey] = { ...data, cached_at: Date.now() };
+    localStorage.setItem(VIBE_CACHE_KEY, JSON.stringify(cache));
+  } catch { /* ignore */ }
+}
+
+// =====================================================================
+// Persona Card (Entity Detail)
+// =====================================================================
+async function loadPersonaCard(entityId, entityName, containerEl) {
+  // Check cache
+  let persona = getPersonaCache(currentDomain, entityId);
+  if (!persona || !persona.keywords || persona.keywords.length === 0) {
+    // Call API
+    containerEl.innerHTML = '<div class="loading" style="font-size:12px;">Extracting persona...</div>';
+    persona = await api('POST', '/persona/extract', {
+      entity_id: entityId, domain: currentDomain, time_decay: 0.1, top_k: 3,
+    });
+    if (persona.error) {
+      containerEl.innerHTML = `<div style="font-size:12px;color:#888;">${persona.error}</div>`;
+      return;
+    }
+    setPersonaCache(currentDomain, entityId, persona);
+  }
+
+  const kws = (persona.keywords || []);
+  containerEl.innerHTML = `
+    <div class="persona-card">
+      <div class="persona-title">Persona: ${esc(entityName)}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:2px;">
+        ${kws.map(k => `<span class="persona-tag">${esc(k)}</span>`).join('')}
+        ${kws.length === 0 ? '<span style="font-size:12px;color:#666;">No keywords</span>' : ''}
+      </div>
+      <div class="persona-summary">${esc(persona.summary || '')}</div>
+      <div style="margin-top:6px;">
+        <button class="small secondary" onclick="reextractPersona('${entityId}','${esc(entityName)}')">Re-extract</button>
+      </div>
+    </div>
+  `;
+}
+
+async function reextractPersona(entityId, entityName) {
+  // Clear cache and re-extract
+  try {
+    const cache = JSON.parse(localStorage.getItem(PERSONA_CACHE_KEY) || '{}');
+    if (cache[currentDomain]) delete cache[currentDomain][entityId];
+    localStorage.setItem(PERSONA_CACHE_KEY, JSON.stringify(cache));
+  } catch { /* ignore */ }
+  const container = document.getElementById('personaContainer');
+  if (container) loadPersonaCard(entityId, entityName, container);
+}
+
+// =====================================================================
+// Tension Score
+// =====================================================================
+async function loadTensionScores(entityId, relatedEntities, containerEl) {
+  if (!relatedEntities || relatedEntities.length === 0) {
+    containerEl.innerHTML = '';
+    return;
+  }
+  const rows = [];
+  for (const rel of relatedEntities.slice(0, 5)) {
+    const data = await api('GET', `/persona/tension?entity_a=${encodeURIComponent(entityId)}&entity_b=${encodeURIComponent(rel.id)}`);
+    if (data.tension_score != null) {
+      const pct = Math.round(data.tension_score * 100);
+      const color = pct >= 70 ? '#e94560' : pct >= 40 ? '#ffb74d' : pct >= 20 ? '#4fc3f7' : '#95d5b2';
+      rows.push(`
+        <div class="tension-row">
+          <span style="min-width:80px;">${esc(rel.name)}</span>
+          <div class="tension-bar" style="flex:1;"><div class="fill" style="width:${pct}%;background:${color};"></div></div>
+          <span style="min-width:40px;text-align:right;">${pct}%</span>
+        </div>
+      `);
+    }
+  }
+  containerEl.innerHTML = rows.length > 0
+    ? `<div class="section-title" style="font-size:12px;margin-top:8px;">Tension Score</div>` + rows.join('')
+    : '';
+}
+
+// =====================================================================
+// Generate: Persona/Vibe slots
+// =====================================================================
+let pendingPersonaConstraints = [];
+let pendingVibeConstraints = [];
+
+function renderPVSlots() {
+  return `
+    <div class="pv-slot" id="pvPersonaSlot">
+      <div class="slot-title">Persona Constraints <button class="small secondary" onclick="autoLoadPersonas()">Auto-load</button></div>
+      <div id="pvPersonaTags" style="display:flex;flex-wrap:wrap;gap:2px;margin-top:4px;">
+        <span style="font-size:11px;color:#666;">None</span>
+      </div>
+    </div>
+    <div class="pv-slot" id="pvVibeSlot">
+      <div class="slot-title">Vibe Constraints <button class="small secondary" onclick="autoLoadVibe()">Auto-load</button></div>
+      <div id="pvVibeTags" style="display:flex;flex-wrap:wrap;gap:2px;margin-top:4px;">
+        <span style="font-size:11px;color:#666;">None</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderPVTags() {
+  const pEl = document.getElementById('pvPersonaTags');
+  if (pEl) {
+    if (pendingPersonaConstraints.length === 0) {
+      pEl.innerHTML = '<span style="font-size:11px;color:#666;">None</span>';
+    } else {
+      pEl.innerHTML = pendingPersonaConstraints.map((pc, i) =>
+        `<span class="persona-tag editable">${esc(pc.entity_name)}: ${pc.keywords.join(', ')}
+          <span class="remove" onclick="pendingPersonaConstraints.splice(${i},1);renderPVTags();">x</span>
+        </span>`
+      ).join('');
+    }
+  }
+  const vEl = document.getElementById('pvVibeTags');
+  if (vEl) {
+    if (pendingVibeConstraints.length === 0) {
+      vEl.innerHTML = '<span style="font-size:11px;color:#666;">None</span>';
+    } else {
+      vEl.innerHTML = pendingVibeConstraints.map((v, i) =>
+        `<span class="vibe-tag">${esc(v)}
+          <span class="remove" onclick="pendingVibeConstraints.splice(${i},1);renderPVTags();">x</span>
+        </span>`
+      ).join('');
+    }
+  }
+}
+
+async function autoLoadPersonas() {
+  if (!currentEventId) return;
+  const evData = await api('GET', `/events/${currentEventId}`);
+  const entities = evData.entities || [];
+  pendingPersonaConstraints = [];
+  for (const ent of entities) {
+    let persona = getPersonaCache(currentDomain, ent.id);
+    if (!persona || !persona.keywords || persona.keywords.length === 0) {
+      persona = await api('POST', '/persona/extract', {
+        entity_id: ent.id, domain: currentDomain, time_decay: 0.1, top_k: 3,
+      });
+      if (!persona.error) setPersonaCache(currentDomain, ent.id, persona);
+    }
+    if (persona.keywords && persona.keywords.length > 0) {
+      pendingPersonaConstraints.push({
+        entity_name: persona.entity_name || ent.name,
+        keywords: persona.keywords,
+      });
+    }
+  }
+  renderPVTags();
+  showToast(`Loaded persona for ${pendingPersonaConstraints.length} entity(s)`);
+}
+
+async function autoLoadVibe() {
+  if (!currentEventId) return;
+  // Extract vibe from events near the current event
+  const evData = await api('GET', `/events/${currentEventId}`);
+  const ev = evData.event || {};
+  const eventIds = [currentEventId];
+  if (evData.prev_event) eventIds.unshift(evData.prev_event.id);
+  if (evData.next_event) eventIds.push(evData.next_event.id);
+
+  const vibe = await api('POST', '/vibe/extract', {
+    event_ids: eventIds, domain: currentDomain, top_k: 3,
+  });
+  if (!vibe.error && vibe.keywords && vibe.keywords.length > 0) {
+    pendingVibeConstraints = vibe.keywords;
+    renderPVTags();
+    showToast(`Loaded ${vibe.keywords.length} vibe keyword(s)`);
+  } else {
+    showToast('Vibe extraction failed', true);
+  }
+}
+
+// =====================================================================
+// Init
+// =====================================================================
+loadDomains();
+</script>
+</body>
+</html>
