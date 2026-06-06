@@ -90,7 +90,7 @@ mweft/
 ```
 
 On first run the launcher:
-1. Builds a self-contained venv under `runtime/` (Python 3.13 via `uv`).
+1. Builds a self-contained venv under `runtime/` (Python 3.11 via `uv`).
 2. Installs `mweft[embed-onnx,manager]` (from `wheels/` offline, else PyPI).
 3. Launches the native Manager desktop app (`mweft-app`), which manages
    projects and registers the MCP server into your AI clients (with

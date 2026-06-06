@@ -1,2 +1,9 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Shell launchers must stay LF even on Windows checkouts — CRLF breaks bash
+# (build_portable.py copies these verbatim into the shipped portable zip).
+*.command text eol=lf
+*.sh text eol=lf
+# Windows batch must be CRLF.
+*.bat text eol=crlf

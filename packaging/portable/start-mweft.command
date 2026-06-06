@@ -45,7 +45,9 @@ fi
 # --- Skip when already set up ---
 if [ ! -f "$READY" ] || [ ! -x "$PYEXE" ]; then
   echo "[MWeft] First-time setup... (once only, 1-5 min depending on network/specs)"
-  "$UV" venv "$VENV" --python 3.13
+  # Pin to 3.11 to match the cp311 wheels bundled by the offline build
+  # (release.yml uses Python 3.11). Keep both sides in lockstep when bumping.
+  "$UV" venv "$VENV" --python 3.11
   if [ -d "$HERE/wheels" ]; then
     # full-offline: use bundled wheels only (zero network)
     "$UV" pip install --python "$PYEXE" --no-index --find-links "$HERE/wheels" "$PKG"

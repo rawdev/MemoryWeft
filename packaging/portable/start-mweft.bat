@@ -45,7 +45,9 @@ REM --- Skip when already set up ---
 if exist "%READY%" if exist "%PYEXE%" goto launch
 
 echo [MWeft] First-time setup... (once only, 1-5 min depending on network/specs)
-"%UV%" venv "%VENV%" --python 3.13
+REM Pin to 3.11 to match the cp311 wheels bundled by the offline build
+REM (release.yml uses Python 3.11). Keep both sides in lockstep when bumping.
+"%UV%" venv "%VENV%" --python 3.11
 if errorlevel 1 goto err
 if exist "%HERE%wheels" (
   REM full-offline: use bundled wheels only (zero network)
