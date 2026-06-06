@@ -92,7 +92,6 @@ Hint surface (returned with every search):
 **Pre-release.** The core memory model and search surface are stable.
 
 Not in this distribution (yet):
-- Multi-tenant sharing (`share_groups`, RLS-driven access control).
 - The full K2G build pipeline (heavy LLM ingestion). MWeft accepts memory
   via `mweft_remember`; large-scale build is a separate concern.
 
