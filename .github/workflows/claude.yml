@@ -1,0 +1,57 @@
+name: claude
+
+# Two modes in one workflow:
+#  - mention: reply to "@claude ..." in issues / issue comments / PR review comments
+#             (Claude can analyze, implement changes, push branches, open PRs)
+#  - review : auto-review every PR when it is opened or updated
+#
+# Auth uses a Claude subscription (Pro/Max) OAuth token — no per-token API
+# billing; usage draws from the subscription quota. Set it up with:
+#   1) install the Claude GitHub App: https://github.com/apps/claude
+#   2) run `claude setup-token` locally, then add the value as the repo secret
+#      CLAUDE_CODE_OAUTH_TOKEN (Settings -> Secrets and variables -> Actions)
+# (To use a pay-as-you-go API key instead, swap in anthropic_api_key.)
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  mention:
+    # Only spin up when "@claude" is actually present (saves quota / minutes).
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+  review:
+    # Automatic review on every PR (own PRs; fork PRs lack the secret and are skipped).
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Review this pull request. Focus on correctness bugs, security
+            issues, and clear code-quality problems. Leave concise inline
+            comments on the specific lines, then a short overall summary.
+            Skip nitpicks and praise.
+          claude_args: "--max-turns 15"
