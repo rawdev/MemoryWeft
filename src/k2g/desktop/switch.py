@@ -46,11 +46,17 @@ def settings_from_entry(entry: "ProjectEntry") -> "Settings":
     Mirrors ``ui.project_registry.entry_env_dict`` (the proven env mapping) but
     targets ``Settings`` *field names* so nothing flows through ``os.environ``.
     """
+    import os
+
     from k2g.core.config import Settings, search_targets_to_csv
     from k2g.ui.project_config import resolve_embedding_dim
 
     emb = entry.embedding or {}
-    provider = str(emb.get("provider") or "local")
+    # Provider: an explicit entry value wins; otherwise fall back to the
+    # deployment env (the portable bundle sets EMBEDDING_PROVIDER=onnx), then
+    # "local". This lets an onnx-only bundle (no torch) serve projects whose
+    # entry left embedding unset, instead of defaulting to the torch backend.
+    provider = str(emb.get("provider") or os.environ.get("EMBEDDING_PROVIDER") or "local")
     model = str(emb.get("model") or "BAAI/bge-m3")
     dim = emb.get("dim")
     if dim in (None, ""):
@@ -66,6 +72,13 @@ def settings_from_entry(entry: "ProjectEntry") -> "Settings":
         # Authoritative backend selection (factory reads this before any env).
         "backend_mode": "postgres" if is_pg else "sqlite",
     }
+    # The ONNX model path is deployment-location-specific (the portable launcher
+    # points it at the bundled model inside the unzip folder), so it comes from
+    # the env, not the registry entry, which must stay portable across machines.
+    if provider == "onnx":
+        onnx_path = os.environ.get("EMBEDDING_ONNX_PATH")
+        if onnx_path:
+            kw["embedding_onnx_path"] = onnx_path
     if entry.domain:
         kw["user_memory_save_domain"] = entry.domain
     if entry.group:

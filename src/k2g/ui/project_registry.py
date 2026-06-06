@@ -293,9 +293,14 @@ def entry_env_dict(entry: ProjectEntry) -> dict[str, str]:
     domain = entry.domain or "default"
     group = entry.group or "default"
     targets = entry.search_targets or [{"domain": domain}]
+    import os
+
     emb = entry.embedding or {}
     model = str(emb.get("model") or "BAAI/bge-m3")
-    provider = str(emb.get("provider") or "local")
+    # Fall back to the deployment env (portable bundle sets EMBEDDING_PROVIDER=onnx)
+    # when the entry leaves the provider unset, so an onnx-only bundle (no torch)
+    # does not default to the torch backend.
+    provider = str(emb.get("provider") or os.environ.get("EMBEDDING_PROVIDER") or "local")
     dim = emb.get("dim")
     if dim in (None, ""):
         dim = resolve_embedding_dim(model)
@@ -319,6 +324,12 @@ def entry_env_dict(entry: ProjectEntry) -> dict[str, str]:
         "EMBEDDING_MODEL": model,
         "EMBEDDING_DIM": str(dim),
     }
+    # Propagate the deployment-specific ONNX model path (set by the portable
+    # launcher) so an onnx project's spawned MCP server can find the bundled model.
+    if provider == "onnx":
+        onnx_path = os.environ.get("EMBEDDING_ONNX_PATH")
+        if onnx_path:
+            env["EMBEDDING_ONNX_PATH"] = onnx_path
     is_pg = (entry.backend == "postgres") or bool(entry.postgres_dsn)
     # DATA_DIR is the *local* anchor for object storage (raw memory originals)
     # and log files — both exist even in Postgres mode (only graph/vector live
