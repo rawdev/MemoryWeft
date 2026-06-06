@@ -69,16 +69,20 @@ def fetch_uv(platform: str, bin_dir: Path) -> None:
     print(f"[uv] -> {bin_dir / uv_name}")
 
 
-def download_wheels(
-    uv_bin: Path, wheels: Path, pkg: str, find_links: str | None = None,
-) -> None:
+def download_wheels(wheels: Path, pkg: str, find_links: str | None = None) -> None:
+    # uv has no `pip download` subcommand, so use the BUILD host's pip to
+    # populate wheels/. The bundled uv is only used at *runtime* by the launcher
+    # (`uv pip install --no-index --find-links wheels`).
     wheels.mkdir(parents=True, exist_ok=True)
-    cmd = [str(uv_bin), "pip", "download", pkg, "-d", str(wheels)]
+    # Include setuptools + wheel so the offline `uv pip install --no-index` can
+    # build any sdist-only deps (e.g. proxy_tools, a pywebview dep on Windows).
+    cmd = [sys.executable, "-m", "pip", "download", pkg, "setuptools", "wheel",
+           "-d", str(wheels)]
     if find_links:
         # Extra wheel source — e.g. a locally built `mweft` wheel before it is
-        # published to PyPI. uv pulls the remaining deps from PyPI as usual.
+        # published to PyPI. The remaining deps come from PyPI as usual.
         cmd += ["--find-links", str(Path(find_links).resolve())]
-    print(f"[wheels] uv pip download {pkg} -> {wheels}"
+    print(f"[wheels] pip download {pkg} -> {wheels}"
           + (f" (+find-links {find_links})" if find_links else ""))
     subprocess.run(cmd, check=True)
 
@@ -126,7 +130,7 @@ def main() -> None:
 
     # 4) (offline) pre-download wheels — for the current platform
     if args.mode == "offline":
-        download_wheels(stage / "bin" / uv_name, stage / "wheels", args.pkg, args.wheels_from)
+        download_wheels(stage / "wheels", args.pkg, args.wheels_from)
         print("[offline] bundling a standalone Python is a follow-up (launcher --python override needed)")
 
     # 5) zip  (do not use with_suffix — it mistakes the version's ".0" for a suffix)
