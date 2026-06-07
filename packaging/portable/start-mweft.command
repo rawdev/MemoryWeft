@@ -62,4 +62,4 @@ fi
 mkdir -p "$HERE/data/project"
 echo "[MWeft] Starting the Manager app - a window will open shortly."
 echo "[MWeft] To quit, close the app window."
-exec "$PYEXE" -m "$MOD" --project-dir "$HERE/data/project"
+exec "$PYEXE" -m "$MOD" --project-dir-default "$HERE/data/project"

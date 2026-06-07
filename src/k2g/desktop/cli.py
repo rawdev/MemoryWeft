@@ -37,6 +37,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "project from ~/.mweft/mweft_manager.json.",
     )
     p.add_argument(
+        "--project-dir-default", type=Path, default=None, dest="project_dir_default",
+        help="Bootstrap project folder used ONLY on a first run with no valid "
+             "last-active project. Unlike --project-dir it does NOT override the "
+             "last-active project on later launches (used by the portable launcher).",
+    )
+    p.add_argument(
         "--slug", default=None,
         help="Registry entry slug — pins the exact project (overrides folder lookup).",
     )
@@ -78,15 +84,29 @@ def _resolve_entry(args: argparse.Namespace):
             raise SystemExit(f"could not register project at {project_dir}")
         return project_dir, entry.slug, entry
 
-    # Neither slug nor dir → last-active.
+    # Last-active wins over a bootstrap default so the project the user last
+    # opened in the Manager is restored next launch (the portable launcher
+    # passes --project-dir-default every time, not --project-dir).
     slug = get_last_active()
     entry = get_project(slug) if slug else None
-    if entry is None:
-        raise SystemExit(
-            "no --project-dir/--slug and no last-active project — "
-            "pass --project-dir <folder>.")
-    project_dir = Path(entry.db_dir or entry.project_dir).resolve()
-    return project_dir, slug, entry
+    if entry is not None:
+        project_dir = Path(entry.db_dir or entry.project_dir).resolve()
+        return project_dir, slug, entry
+
+    # No last-active → seed/use the bootstrap default if one was provided.
+    default_dir = getattr(args, "project_dir_default", None)
+    if default_dir is not None:
+        project_dir = default_dir.resolve()
+        project_dir.mkdir(parents=True, exist_ok=True)
+        _ensure_registry_entry(project_dir)
+        entry = find_by_dir(project_dir)
+        if entry is None:
+            raise SystemExit(f"could not register project at {project_dir}")
+        return project_dir, entry.slug, entry
+
+    raise SystemExit(
+        "no --project-dir/--slug and no last-active project — "
+        "pass --project-dir <folder>.")
 
 
 def _static_index() -> Path:
@@ -120,6 +140,13 @@ def main(argv: list[str] | None = None) -> int:
 
     project_dir, slug, entry = _resolve_entry(args)
     logger.info("Opening project '%s' at %s", slug, project_dir)
+    # Remember what we opened so the next launch restores it (the launcher's
+    # --project-dir-default no longer pins a fixed project).
+    try:
+        from k2g.ui.project_registry import set_last_active
+        set_last_active(slug)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("set_last_active(%s) at startup failed: %s", slug, exc)
 
     # Activate the project IN MEMORY — no os.environ for project config.
     from k2g.desktop import switch

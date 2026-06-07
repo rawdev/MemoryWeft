@@ -65,7 +65,7 @@ if not exist "%HERE%data\project" mkdir "%HERE%data\project"
 echo [MWeft] Starting the Manager app - a window will open shortly.
 echo [MWeft] (The native window needs the WebView2 runtime; preinstalled on Windows 11.)
 echo [MWeft] To quit, close the app window.
-"%PYEXE%" -m %MOD% --project-dir "%HERE%data\project"
+"%PYEXE%" -m %MOD% --project-dir-default "%HERE%data\project"
 goto end
 
 :err
