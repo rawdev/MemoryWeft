@@ -4486,10 +4486,21 @@ function showOnboarding(cfg, slug, dir) {
   const dom = escapeHtml(cfg.domain && cfg.domain !== 'default' ? cfg.domain : '');
   const grp = escapeHtml(cfg.group && cfg.group !== 'default' ? cfg.group : 'default');
   const tags = escapeHtml(Array.isArray(cfg.save_tags) ? cfg.save_tags.join(', ') : '');
+  const kind = (cfg.backend && cfg.backend.kind) || 'sqlite';
+  const dataDirVal = escapeHtml(kind === 'sqlite'
+    ? ((cfg.backend && cfg.backend.data_dir) || cfg.data_dir || '')
+    : (cfg.data_dir || ''));
   const sec = (titleK, bodyK, inner) =>
     `<div class="onb-sec"><div class="onb-h">${t(titleK)}</div><div class="onb-b">${t(bodyK)}</div>${inner || ''}</div>`;
   const field = (id, val, labelK, phK) =>
     `<label class="onb-l">${t(labelK)} <input type="text" id="${id}" value="${val}"${phK ? ` placeholder="${t(phK)}"` : ''}></label>`;
+  // SQLite reuses the DB folder (read-only); Postgres has no folder → require one.
+  const dataSec = kind === 'postgres'
+    ? sec('onb.data.title', 'onb.data.bodyPg', field('onb-data-dir', dataDirVal, 'onb.data.label', 'onb.data.ph'))
+    : `<div class="onb-sec"><div class="onb-h">${t('onb.data.title')}</div>`
+      + `<div class="onb-b">${t('onb.data.bodySqlite')}</div>`
+      + `<label class="onb-l">${t('onb.data.label')} `
+      + `<input type="text" id="onb-data-dir" value="${dataDirVal}" readonly></label></div>`;
   const o = document.createElement('div');
   o.id = 'onb-overlay'; o.className = 'onb-overlay';
   o.innerHTML = `
@@ -4497,6 +4508,7 @@ function showOnboarding(cfg, slug, dir) {
       <h2 id="onb-title" style="margin:0 0 4px;">${t('onb.title')}</h2>
       <div class="muted" style="font-size:13px; margin-bottom:8px;">${t('onb.intro')}</div>
       ${sec('onb.project.title', 'onb.project.body')}
+      ${dataSec}
       ${sec('onb.domain.title', 'onb.domain.body', field('onb-domain', dom, 'onb.domain.label', 'onb.domain.ph'))}
       ${sec('onb.group.title', 'onb.group.body', field('onb-group', grp, 'onb.group.label'))}
       ${sec('onb.tags.title', 'onb.tags.body', field('onb-tags', tags, 'onb.tags.label', 'onb.tags.ph'))}
@@ -4527,21 +4539,31 @@ async function _onbStart() {
   const group = (document.getElementById('onb-group') || {}).value.trim() || 'default';
   const tags = ((document.getElementById('onb-tags') || {}).value || '')
     .split(',').map((s) => s.trim()).filter(Boolean);
+  const dataDir = (document.getElementById('onb-data-dir') || {}).value.trim();
   const msg = document.getElementById('onb-msg');
+  const cfg = _ONB_CFG || {};
+  const kind = (cfg.backend && cfg.backend.kind) || 'sqlite';
+  // Object storage / logs are local files even for Postgres, so a data folder is
+  // required there (SQLite reuses its DB folder).
+  if (kind === 'postgres' && !dataDir) {
+    if (msg) msg.innerHTML = `<span style="color:#dc2626">${t('onb.errData')}</span>`;
+    const el = document.getElementById('onb-data-dir'); if (el) el.focus();
+    return;
+  }
   const btns = document.querySelectorAll('#onb-overlay button');
   btns.forEach((b) => { b.disabled = true; });
   if (msg) msg.innerHTML = `<span class="muted">${t('onb.saving')}</span>`;
 
-  const cfg = _ONB_CFG || {};
-  const backend = (cfg.backend && cfg.backend.kind)
-    ? cfg.backend
-    : { kind: 'sqlite', data_dir: _ONB_DIR || cfg.project_dir || '' };
+  const backend = kind === 'postgres'
+    ? { kind: 'postgres', dsn: (cfg.backend && cfg.backend.dsn) || '' }
+    : { kind: 'sqlite', data_dir: dataDir || (cfg.backend && cfg.backend.data_dir) || cfg.data_dir || '' };
+  const project_dir = kind === 'postgres' ? dataDir : (cfg.project_dir || dataDir);
   const embedding = cfg.embedding || undefined;   // round-trip effective provider (onnx)
   try {
     const r = await fetch('/api/project/init', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        slug: _ONB_SLUG, project_dir: cfg.project_dir || _ONB_DIR,
+        slug: _ONB_SLUG, project_dir,
         group, domain, backend, save_tags: tags, search_targets: [{ domain }],
         embedding, force: true,
       }),

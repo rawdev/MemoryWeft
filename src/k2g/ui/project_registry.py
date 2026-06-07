@@ -52,6 +52,18 @@ def registry_path() -> Path:
     return Path.home() / REGISTRY_DIR_NAME / REGISTRY_FILE_NAME
 
 
+def default_data_dir(slug: str) -> str:
+    """Deterministic per-project local anchor for object storage + logs.
+
+    Object storage holds the raw memory originals and is required even in
+    Postgres mode (only graph/vector live remotely). When an entry has no
+    ``db_dir``/``project_dir`` (e.g. a Postgres project with no local folder),
+    anchor it at ``~/.mweft/<slug>`` — next to the registry, stable across
+    launches, never CWD-relative or the drive root.
+    """
+    return str(Path.home() / REGISTRY_DIR_NAME / (slug or "default"))
+
+
 def legacy_registry_path() -> Path:
     """Legacy v1 registry ``~/.mweft/projects.json`` (migrated-from)."""
     return Path.home() / REGISTRY_DIR_NAME / LEGACY_FILE_NAME
@@ -338,7 +350,7 @@ def entry_env_dict(entry: ProjectEntry) -> dict[str, str]:
     # sub-paths to "/objects" + "/logs", which resolve to the drive root
     # (e.g. F:\objects, F:\logs) — stray garbage folders. (Backend selection is
     # driven by K2G_POSTGRES_DSN, not DATA_DIR, so this does not flip to sqlite.)
-    env["DATA_DIR"] = entry.db_dir or entry.project_dir
+    env["DATA_DIR"] = entry.db_dir or entry.project_dir or default_data_dir(entry.slug)
     if is_pg and entry.postgres_dsn:
         env["K2G_POSTGRES_DSN"] = entry.postgres_dsn
     return env
@@ -491,6 +503,7 @@ __all__ = [
     "ProjectEntry",
     "registry_path",
     "legacy_registry_path",
+    "default_data_dir",
     "list_projects",
     "get_project",
     "find_by_dir",

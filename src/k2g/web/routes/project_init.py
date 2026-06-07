@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 from k2g.ui.project_config import resolve_embedding_dim
 from k2g.ui.project_registry import (
     add_project,
+    default_data_dir,
     entry_env_dict,
     find_by_dir,
     get_last_active,
@@ -120,6 +121,7 @@ def get_project_config(project_dir: str = "", slug: str = "") -> dict[str, Any]:
         return sanitize({
             "initialized": False,
             "project_dir": (entry.project_dir if entry else str(Path(project_dir)) if project_dir else ""),
+            "data_dir": default_data_dir(entry.slug if entry else (slug or "default")),
             "name": entry.name if entry else None,
             "path": str(registry_path()),
             "ai_clients": list(entry.ai_clients or []) if entry else [],
@@ -133,6 +135,9 @@ def get_project_config(project_dir: str = "", slug: str = "") -> dict[str, Any]:
     return sanitize({
         "initialized": True,
         "project_dir": entry.project_dir,
+        # Effective local anchor (object storage + logs). For Postgres the entry
+        # may carry none, so suggest a per-project default the onboarding pre-fills.
+        "data_dir": entry.db_dir or entry.project_dir or default_data_dir(entry.slug),
         "path": str(registry_path()),
         "group": entry.group or "default",
         "domain": entry.domain or "default",

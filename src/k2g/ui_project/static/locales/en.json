@@ -473,5 +473,11 @@
   "onb.start": "Start",
   "onb.skip": "Skip (use defaults)",
   "onb.saving": "Saving project settings…",
-  "onb.warming": "Warming up the embedding model…"
+  "onb.warming": "Warming up the embedding model…",
+  "onb.data.title": "Data folder",
+  "onb.data.bodyPg": "Postgres keeps the graph/vector data remotely, but each memory's raw original and the logs are stored as local files. Choose a folder for them.",
+  "onb.data.bodySqlite": "Your SQLite DB folder is reused for the raw originals and logs — no extra path needed.",
+  "onb.data.label": "Local data folder",
+  "onb.data.ph": "e.g. C:\\Users\\me\\.mweft\\my-project",
+  "onb.errData": "Enter a local data folder — required for Postgres (object storage & logs live there)."
 }

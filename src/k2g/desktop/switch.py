@@ -50,6 +50,7 @@ def settings_from_entry(entry: "ProjectEntry") -> "Settings":
 
     from k2g.core.config import Settings, search_targets_to_csv
     from k2g.ui.project_config import resolve_embedding_dim
+    from k2g.ui.project_registry import default_data_dir
 
     emb = entry.embedding or {}
     # Provider: an explicit entry value wins; otherwise fall back to the
@@ -65,7 +66,7 @@ def settings_from_entry(entry: "ProjectEntry") -> "Settings":
     is_pg = (entry.backend == "postgres") or bool(entry.postgres_dsn)
 
     kw: dict = {
-        "data_dir": entry.db_dir or entry.project_dir,
+        "data_dir": entry.db_dir or entry.project_dir or default_data_dir(entry.slug),
         "embedding_provider": provider,
         "embedding_model": model,
         "embedding_dim": int(dim),
