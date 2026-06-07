@@ -281,6 +281,10 @@ def create_tag(
         domain=domain,
         parent_id=parent_tag_id,
         summary=summary,
+        # Manager-created tags are human-assigned forced tags → the Discovery
+        # axis, so they participate in tag-scope Leiden community computation
+        # (BP-96). Matches the live save path (save_context: mweft_save_tag).
+        source="mweft_save_tag",
     )
     graph.set_user_tag("group", tag_id, "user_created")
 
