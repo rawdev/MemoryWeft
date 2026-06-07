@@ -333,6 +333,18 @@ class PostgresGraphStore:
     def setup_schema(self) -> None:
         """Tier 1 (Entity / Event / Group / 5 edges + entity_embedding_meta)
         + pgvector extension + HNSW indexes."""
+        # domain_registry was added to Tier 1 after the version guard, so a DB
+        # that adopts/skips Tier 1 (its ``events`` table already present) would
+        # never get it → register_domain / list_managed_domains raise "relation
+        # domain_registry does not exist". Ensure it unconditionally — it is tiny
+        # and idempotent and takes no lock on existing tables.
+        try:
+            with self._conn.cursor() as cur:
+                for sql in CREATE_DOMAIN_REGISTRY_SQL:
+                    cur.execute(sql)
+            self._conn.commit()
+        except psycopg2.Error:
+            self._conn.rollback()
         if self._schema_up_to_date("tier1", _TIER1_SCHEMA_VERSION, "public.events"):
             logger.debug("Tier1 schema already at v%d — skip DDL", _TIER1_SCHEMA_VERSION)
             return
@@ -1841,15 +1853,19 @@ class PostgresGraphStore:
         name = (name or "").strip()
         if not name:
             return False
-        with self._conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO domain_registry (name) VALUES (%s) "
-                "ON CONFLICT (name) DO NOTHING",
-                (name,),
-            )
-            added = cur.rowcount > 0
-        self._conn.commit()
-        return added
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO domain_registry (name) VALUES (%s) "
+                    "ON CONFLICT (name) DO NOTHING",
+                    (name,),
+                )
+                added = cur.rowcount > 0
+            self._conn.commit()
+            return added
+        except psycopg2.Error:
+            self._conn.rollback()  # don't leave the shared connection poisoned
+            raise
 
     def list_registered_domains(self) -> list[str]:
         with self._conn.cursor() as cur:
