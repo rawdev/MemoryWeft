@@ -86,6 +86,7 @@ class SqliteGraphStore:
         *,
         load_vec: bool = True,
         embedding_dim: int = 1024,
+        embedding_model: str | None = None,
     ) -> None:
         """Args:
             path: SQLite file path, e.g. ``./data/k2g_all_in_one.db``.
@@ -93,9 +94,12 @@ class SqliteGraphStore:
                 vec0 virtual-table creation is skipped (useful for schema-only
                 unit tests).
             embedding_dim: Embedding dimension for vec0 tables. Default 1024.
+            embedding_model: Embedding model id; stamped into the DB fingerprint
+                so a later open with an incompatible dim/model is blocked.
         """
         self._path = path
         self._embedding_dim = embedding_dim
+        self._embedding_model = embedding_model
         logger.info("SqliteGraphStore init: path=%s, dim=%d", path, embedding_dim)
 
         # Ensure the parent directory exists — guards against first-run DATA_DIR
@@ -129,6 +133,9 @@ class SqliteGraphStore:
 
         self._vec_loaded = load_vec
         self.setup_schema()
+        # Refuse to open a DB whose embedding fingerprint (dim/model) differs —
+        # mixing vector dimensions/models in one store silently corrupts search.
+        self._check_embedding_fingerprint()
         # Tier 2a/2b schemas are also ensured at startup so that idempotent
         # ALTERs for plan_nodes / context_groups / event_template_groups are
         # applied automatically at MCP startup — no manual call required after
@@ -168,6 +175,58 @@ class SqliteGraphStore:
                 self._conn.enable_load_extension(False)
             except AttributeError:
                 pass
+
+    def _check_embedding_fingerprint(self) -> None:
+        """Stamp (first open) or verify (later opens) the embedding fingerprint.
+
+        Raises ``EmbeddingFingerprintMismatch`` and closes the connection if the
+        current embedding dim/model is incompatible with what the DB was built
+        with, so the app fails fast instead of corrupting vector search.
+        """
+        from k2g.db_store.embedding_guard import (
+            DIM_KEY,
+            MODEL_KEY,
+            EmbeddingFingerprintMismatch,
+            fingerprint_problems,
+            mismatch_message,
+        )
+
+        cur = self._conn.cursor()
+        cur.execute(
+            "CREATE TABLE IF NOT EXISTS k2g_meta (key TEXT PRIMARY KEY, value TEXT)"
+        )
+        rows = {
+            r[0]: r[1]
+            for r in cur.execute(
+                "SELECT key, value FROM k2g_meta WHERE key IN (?, ?)",
+                (DIM_KEY, MODEL_KEY),
+            ).fetchall()
+        }
+        cur_dim = str(self._embedding_dim)
+        cur_model = (self._embedding_model or "").strip()
+        stored_dim = rows.get(DIM_KEY)
+        stored_model = rows.get(MODEL_KEY)
+
+        if stored_dim is None:  # new or legacy DB — stamp the current fingerprint
+            cur.execute(
+                "INSERT OR REPLACE INTO k2g_meta (key, value) VALUES (?, ?), (?, ?)",
+                (DIM_KEY, cur_dim, MODEL_KEY, cur_model),
+            )
+            self._conn.commit()
+            return
+
+        problems = fingerprint_problems(stored_dim, stored_model, cur_dim, cur_model)
+        if problems:
+            self._conn.close()
+            raise EmbeddingFingerprintMismatch(
+                mismatch_message(stored_dim, stored_model, cur_dim, cur_model, problems)
+            )
+        if not stored_model and cur_model:  # back-fill model on a dim-only legacy stamp
+            cur.execute(
+                "INSERT OR REPLACE INTO k2g_meta (key, value) VALUES (?, ?)",
+                (MODEL_KEY, cur_model),
+            )
+            self._conn.commit()
 
     # ------------------------------------------------------------------
     # (a) Schema bootstrap — real implementation

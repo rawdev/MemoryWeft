@@ -164,16 +164,25 @@ class PostgresGraphStore:
     Callers may pass either a dict/list or an already-serialised JSON string.
     """
 
-    def __init__(self, dsn: str, *, embedding_dim: int = 1024) -> None:
+    def __init__(
+        self,
+        dsn: str,
+        *,
+        embedding_dim: int = 1024,
+        embedding_model: str | None = None,
+    ) -> None:
         """Args:
             dsn: psycopg2 connection string, e.g.
                 ``postgresql://user:pw@host/db``.
             embedding_dim: pgvector dimension matching
                 ``settings.embedding_dim``.  Determines the vector
                 column width for new databases (default 1024).
+            embedding_model: Embedding model id; stamped into the DB fingerprint
+                so a later open with an incompatible dim/model is blocked.
         """
         self._dsn = dsn
         self._embedding_dim = int(embedding_dim)
+        self._embedding_model = embedding_model
         logger.info("PostgresGraphStore init: dim=%d", self._embedding_dim)
         self._conn: PgConnection = psycopg2.connect(
             dsn,
@@ -199,6 +208,60 @@ class PostgresGraphStore:
             # CREATE IF NOT EXISTS / ADD COLUMN IF NOT EXISTS.
             self.setup_training_schema()
             self.setup_bp30_schema()
+            # Block opening with an incompatible embedding dim/model — mixing
+            # vector dimensions/models in one store silently corrupts search.
+            self._check_embedding_fingerprint()
+
+    def _check_embedding_fingerprint(self) -> None:
+        """Stamp (first open) or verify (later opens) the embedding fingerprint.
+
+        Raises ``EmbeddingFingerprintMismatch`` if the current embedding
+        dim/model is incompatible with what the DB was built with.
+        """
+        from k2g.db_store.embedding_guard import (
+            DIM_KEY,
+            MODEL_KEY,
+            EmbeddingFingerprintMismatch,
+            fingerprint_problems,
+            mismatch_message,
+        )
+
+        cur_dim = str(self._embedding_dim)
+        cur_model = (self._embedding_model or "").strip()
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS k2g_meta (key TEXT PRIMARY KEY, value TEXT)"
+            )
+            cur.execute(
+                "SELECT key, value FROM k2g_meta WHERE key IN (%s, %s)",
+                (DIM_KEY, MODEL_KEY),
+            )
+            rows = {r["key"]: r["value"] for r in cur.fetchall()}
+            stored_dim = rows.get(DIM_KEY)
+            stored_model = rows.get(MODEL_KEY)
+
+            if stored_dim is None:  # new or legacy DB — stamp the fingerprint
+                cur.execute(
+                    "INSERT INTO k2g_meta (key, value) VALUES (%s, %s), (%s, %s) "
+                    "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                    (DIM_KEY, cur_dim, MODEL_KEY, cur_model),
+                )
+                self._conn.commit()
+                return
+
+            problems = fingerprint_problems(stored_dim, stored_model, cur_dim, cur_model)
+            if problems:
+                self._conn.rollback()
+                raise EmbeddingFingerprintMismatch(
+                    mismatch_message(stored_dim, stored_model, cur_dim, cur_model, problems)
+                )
+            if not stored_model and cur_model:  # back-fill model on a dim-only stamp
+                cur.execute(
+                    "INSERT INTO k2g_meta (key, value) VALUES (%s, %s) "
+                    "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                    (MODEL_KEY, cur_model),
+                )
+                self._conn.commit()
 
     # ------------------------------------------------------------------
     # (a) Schema bootstrap — implementation

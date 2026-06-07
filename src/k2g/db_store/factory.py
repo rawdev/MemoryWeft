@@ -108,6 +108,7 @@ def build_graph_backend(settings: "Settings") -> "GraphStoreProtocol":
         return SqliteGraphStore(
             path=settings.sqlite_all_in_one_path,
             embedding_dim=settings.embedding_dim,
+            embedding_model=settings.embedding_model,
         )
     from k2g.db_store.postgres.graph import PostgresGraphStore
 
@@ -116,7 +117,11 @@ def build_graph_backend(settings: "Settings") -> "GraphStoreProtocol":
         raise RuntimeError(
             "PG mode requires a DSN -- set K2G_POSTGRES_DSN or postgres_graph_dsn.",
         )
-    return PostgresGraphStore(dsn=dsn, embedding_dim=settings.embedding_dim)
+    return PostgresGraphStore(
+        dsn=dsn,
+        embedding_dim=settings.embedding_dim,
+        embedding_model=settings.embedding_model,
+    )
 
 
 def build_vector_backend(settings: "Settings") -> "VectorStoreProtocol":
