@@ -4501,25 +4501,31 @@ function showOnboarding(cfg, slug, dir) {
   const grp = escapeHtml(cfg.group && cfg.group !== 'default' ? cfg.group : 'default');
   const tags = escapeHtml(Array.isArray(cfg.save_tags) ? cfg.save_tags.join(', ') : '');
   const kind = (cfg.backend && cfg.backend.kind) || 'sqlite';
-  // Read-only only for an existing SQLite project that already has its DB folder;
-  // a new project (no folder) or Postgres must enter/choose one.
-  const existingSqliteDir = (kind === 'sqlite' && cfg.backend && cfg.backend.data_dir) ? cfg.backend.data_dir : '';
-  const dataReadonly = !!existingSqliteDir;
-  const dataDirVal = escapeHtml(existingSqliteDir || cfg.data_dir || '');
+  const dsnVal = escapeHtml(kind === 'postgres' && cfg.backend ? (cfg.backend.dsn || '') : '');
+  const dataDirVal = escapeHtml((kind === 'sqlite' && cfg.backend && cfg.backend.data_dir) || cfg.data_dir || '');
   const sec = (titleK, bodyK, inner) =>
     `<div class="onb-sec"><div class="onb-h">${t(titleK)}</div><div class="onb-b">${t(bodyK)}</div>${inner || ''}</div>`;
   const field = (id, val, labelK, phK) =>
     `<label class="onb-l">${t(labelK)} <input type="text" id="${id}" value="${val}"${phK ? ` placeholder="${t(phK)}"` : ''}></label>`;
-  // Existing SQLite reuses its DB folder (read-only); a new project or Postgres
-  // must enter a local data folder (required).
-  const dataBodyK = dataReadonly ? 'onb.data.bodyReuse'
-    : (kind === 'postgres' ? 'onb.data.bodyPg' : 'onb.data.bodyNew');
-  const dataSec = dataReadonly
-    ? `<div class="onb-sec"><div class="onb-h">${t('onb.data.title')}</div>`
-      + `<div class="onb-b">${t(dataBodyK)}</div>`
-      + `<label class="onb-l">${t('onb.data.label')} `
-      + `<input type="text" id="onb-data-dir" value="${dataDirVal}" readonly></label></div>`
-    : sec('onb.data.title', dataBodyK, field('onb-data-dir', dataDirVal, 'onb.data.label', 'onb.data.ph'));
+  // Database: choose the backend (SQLite local file vs Postgres + its DSN).
+  const dbSec = `<div class="onb-sec">
+      <div class="onb-h">${t('onb.db.title')}</div>
+      <div class="onb-b">${t('onb.db.body')}</div>
+      <div style="margin-top:6px; font-size:13px;">
+        <label style="margin-right:16px;"><input type="radio" name="onb-backend" value="sqlite" ${kind !== 'postgres' ? 'checked' : ''} onchange="_onbToggleBackend()"> ${t('onb.db.sqlite')}</label>
+        <label><input type="radio" name="onb-backend" value="postgres" ${kind === 'postgres' ? 'checked' : ''} onchange="_onbToggleBackend()"> ${t('onb.db.postgres')}</label>
+      </div>
+      <div id="onb-dsn-wrap" style="${kind === 'postgres' ? '' : 'display:none;'}">
+        ${field('onb-dsn', dsnVal, 'onb.db.dsn', 'onb.db.dsnPh')}
+      </div>
+    </div>`;
+  // Data folder: always an editable required path (the DB folder for SQLite; the
+  // local anchor for raw originals + logs in Postgres). Body adapts to backend.
+  const dataSec = `<div class="onb-sec">
+      <div class="onb-h">${t('onb.data.title')}</div>
+      <div class="onb-b" id="onb-data-body">${t(kind === 'postgres' ? 'onb.data.bodyPg' : 'onb.data.bodyNew')}</div>
+      ${field('onb-data-dir', dataDirVal, 'onb.data.label', 'onb.data.ph')}
+    </div>`;
   const o = document.createElement('div');
   o.id = 'onb-overlay'; o.className = 'onb-overlay';
   o.innerHTML = `
@@ -4527,6 +4533,7 @@ function showOnboarding(cfg, slug, dir) {
       <h2 id="onb-title" style="margin:0 0 4px;">${t('onb.title')}</h2>
       <div class="muted" style="font-size:13px; margin-bottom:8px;">${t('onb.intro')}</div>
       ${sec('onb.project.title', 'onb.project.body')}
+      ${dbSec}
       ${dataSec}
       ${sec('onb.domain.title', 'onb.domain.body', field('onb-domain', dom, 'onb.domain.label', 'onb.domain.ph'))}
       ${sec('onb.group.title', 'onb.group.body', field('onb-group', grp, 'onb.group.label'))}
@@ -4538,6 +4545,14 @@ function showOnboarding(cfg, slug, dir) {
       </div>
     </div>`;
   document.body.appendChild(o);
+}
+
+function _onbToggleBackend() {
+  const pg = (document.querySelector('input[name="onb-backend"]:checked') || {}).value === 'postgres';
+  const wrap = document.getElementById('onb-dsn-wrap');
+  if (wrap) wrap.style.display = pg ? '' : 'none';
+  const body = document.getElementById('onb-data-body');
+  if (body) body.innerHTML = t(pg ? 'onb.data.bodyPg' : 'onb.data.bodyNew');
 }
 
 async function _onbWarmup() {
@@ -4558,29 +4573,42 @@ async function _onbSkip() {
   }
 }
 
+async function _onbPost(url, body) {
+  try {
+    await fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (e) { /* best-effort */ }
+}
+
 async function _onbStart() {
   const domain = (document.getElementById('onb-domain') || {}).value.trim() || 'default';
   const group = (document.getElementById('onb-group') || {}).value.trim() || 'default';
   const tags = ((document.getElementById('onb-tags') || {}).value || '')
     .split(',').map((s) => s.trim()).filter(Boolean);
   const dataDir = (document.getElementById('onb-data-dir') || {}).value.trim();
+  const kind = (document.querySelector('input[name="onb-backend"]:checked') || {}).value || 'sqlite';
+  const dsn = (document.getElementById('onb-dsn') || {}).value.trim();
   const msg = document.getElementById('onb-msg');
-  const cfg = _ONB_CFG || {};
-  const kind = (cfg.backend && cfg.backend.kind) || 'sqlite';
-  // The data folder is where the DB (sqlite), raw memory originals and logs
-  // live — always required.
-  if (!dataDir) {
-    if (msg) msg.innerHTML = `<span style="color:#dc2626">${t('onb.errData')}</span>`;
-    const el = document.getElementById('onb-data-dir'); if (el) el.focus();
-    return;
-  }
+  const fail = (k, focusId) => {
+    if (msg) msg.innerHTML = `<span style="color:#dc2626">${t(k)}</span>`;
+    const el = focusId && document.getElementById(focusId); if (el) el.focus();
+  };
+  // The data folder (DB folder for sqlite, local anchor for postgres) is always
+  // required; Postgres also needs a DSN.
+  if (!dataDir) { fail('onb.errData', 'onb-data-dir'); return; }
+  if (kind === 'postgres' && !dsn) { fail('onb.errDsn', 'onb-dsn'); return; }
+
   const btns = document.querySelectorAll('#onb-overlay button');
   btns.forEach((b) => { b.disabled = true; });
+  const reenable = () => btns.forEach((b) => { b.disabled = false; });
   if (msg) msg.innerHTML = `<span class="muted">${t('onb.saving')}</span>`;
 
+  const cfg = _ONB_CFG || {};
   const backend = kind === 'postgres'
-    ? { kind: 'postgres', dsn: (cfg.backend && cfg.backend.dsn) || '' }
-    : { kind: 'sqlite', data_dir: dataDir || (cfg.backend && cfg.backend.data_dir) || cfg.data_dir || '' };
+    ? { kind: 'postgres', dsn }
+    : { kind: 'sqlite', data_dir: dataDir };
   const project_dir = kind === 'postgres' ? dataDir : (cfg.project_dir || dataDir);
   const embedding = cfg.embedding || undefined;   // round-trip effective provider (onnx)
   try {
@@ -4595,25 +4623,28 @@ async function _onbStart() {
     const data = await r.json();
     if (!r.ok) {
       if (msg) msg.innerHTML = `<span style="color:#dc2626">${escapeHtml(data.detail || 'failed')}</span>`;
-      btns.forEach((b) => { b.disabled = false; });
+      reenable();
       return;
     }
-    _onbDismiss(data.slug || _ONB_SLUG || _ONB_DIR);
-    if (_ONB_MODE === 'register') {
-      // Newly registered project (not the active one) → refresh the list.
-      _onbClose();
-      if (typeof _prRender === 'function') await _prRender();
-    } else {
-      await _onbWarmup();             // first run of the active project → warm the model
-      _onbClose();
-      await loadCurrentProject();
-      await loadDomains();
-      setDomain(domain);
-      showTab('summary');
-    }
+    const useSlug = data.slug || _ONB_SLUG;
+    _onbDismiss(useSlug || _ONB_DIR);
+
+    // Activate so the project's stores are live, then create the entered domain
+    // and tags directly in its DB (group is the save-group config set above).
+    await _onbPost('/api/projects/activate', { slug: useSlug });
+    if (msg) msg.innerHTML = `<span class="muted">${t('onb.creating')}</span>`;
+    if (domain && domain !== 'default') await _onbPost('/api/domains/register', { name: domain });
+    for (const tg of tags) await _onbPost('/api/tags', { name: tg, domain: domain || 'default' });
+
+    await _onbWarmup();
+    _onbClose();
+    await loadCurrentProject();
+    await loadDomains();
+    setDomain(domain);
+    showTab('summary');
   } catch (e) {
     if (msg) msg.innerHTML = `<span style="color:#dc2626">${escapeHtml(String(e))}</span>`;
-    btns.forEach((b) => { b.disabled = false; });
+    reenable();
   }
 }
 

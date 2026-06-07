@@ -480,5 +480,13 @@
   "onb.data.bodyReuse": "This project's existing data folder is reused for the raw originals and logs — no extra path needed.",
   "onb.data.label": "Local data folder",
   "onb.data.ph": "e.g. C:\\Users\\me\\.mweft\\my-project",
-  "onb.errData": "Enter a local data folder — required for Postgres (object storage & logs live there)."
+  "onb.errData": "Enter a local data folder for this project.",
+  "onb.db.title": "Database",
+  "onb.db.body": "Where the graph and vectors are stored. SQLite keeps everything in a local file; Postgres uses a server (enter its connection string).",
+  "onb.db.sqlite": "SQLite (local file)",
+  "onb.db.postgres": "Postgres (server)",
+  "onb.db.dsn": "Connection string (DSN)",
+  "onb.db.dsnPh": "postgresql://user:pass@host:5432/db",
+  "onb.errDsn": "Enter the Postgres connection string.",
+  "onb.creating": "Creating the domain & tags…"
 }
