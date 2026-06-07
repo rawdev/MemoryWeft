@@ -1898,6 +1898,11 @@ async function showIntroPanel() {
     </div>
 
     <div class="card">
+      <h3>${t('intro.org.title')}</h3>
+      <div style="font-size:13px; line-height:1.6;">${t('intro.org.body')}</div>
+    </div>
+
+    <div class="card">
       <h3>${t('intro.must.title')}</h3>
       <div style="font-size:13px; line-height:1.6;">${t('intro.must.body')}</div>
     </div>
@@ -3048,8 +3053,7 @@ function showExportPanel() {
       </div>
     </div>
     <div style="margin: 6px 0;">
-      <label><input type="checkbox" id="exp-no-seg"> Skip segments (--no-segments)</label><br>
-      <label><input type="checkbox" id="exp-no-plan"> Skip plan (--no-plan)</label>
+      <label><input type="checkbox" id="exp-no-seg"> Skip segments (--no-segments)</label>
     </div>
     <button onclick="doExport()">Export</button>
     <div id="exp-result" style="margin-top: 10px;"></div>
@@ -3100,7 +3104,6 @@ async function _exportOneDomain(dom, path) {
     archive_path: path,
     options: {
       include_segments: !document.getElementById('exp-no-seg').checked,
-      include_plan: !document.getElementById('exp-no-plan').checked,
     },
   };
   document.getElementById('exp-result').innerHTML =
@@ -3133,7 +3136,6 @@ async function _exportOneDomain(dom, path) {
 async function _exportAllDomains(path) {
   const opts = {
     include_segments: !document.getElementById('exp-no-seg').checked,
-    include_plan: !document.getElementById('exp-no-plan').checked,
   };
   const out = document.getElementById('exp-result');
   const results = [];
@@ -3182,32 +3184,24 @@ async function _exportAllDomains(path) {
 
 function showImportPanel() {
   info(`
-    <h3>Import archive</h3>
+    <h3>${t('imp.title')}</h3>
+    <div style="margin:6px 0; padding:8px 10px; border:1px solid #fca5a5; background:#fef2f2; border-radius:6px; font-size:12px; line-height:1.6;">
+      ${t('imp.restoreWarn')}
+    </div>
     <div style="margin: 6px 0;">
-      <label>Archive path:<br>
+      <label>${t('imp.pathLabel')}<br>
         <span style="display:flex; gap:4px;">
           <input type="text" id="imp-path" placeholder="e.g. G:\\My Drive\\MWeft-backup\\xxx.mweft.tar.gz" style="flex:1">
-          <button type="button" onclick="pickImportPath()" title="Browse file">📁</button>
+          <button type="button" onclick="pickImportPath()" title="${t('imp.browseFile')}">📁</button>
         </span>
       </label>
     </div>
-    <button onclick="doPreview()">Preview</button>
+    <button onclick="doPreview()">${t('imp.previewBtn')}</button>
     <div id="imp-preview" style="margin-top: 8px;"></div>
 
-    <h3 style="margin-top: 14px;">Import options</h3>
-    <div style="margin: 6px 0;">
-      <label>Strategy:
-        <select id="imp-strategy">
-          <option value="skip">skip (default)</option>
-          <option value="overwrite">overwrite</option>
-          <option value="fail">fail</option>
-        </select>
-      </label>
-    </div>
-    <div style="margin: 6px 0;">
-      <label><input type="checkbox" id="imp-dry-run" checked> Dry-run (no DB changes)</label>
-    </div>
-    <button onclick="doImport()">Import</button>
+    <button onclick="doImport()" style="margin-top:12px; background:#b91c1c; color:#fff; border-color:#b91c1c;">
+      ${t('imp.restoreBtn')}
+    </button>
     <div id="imp-result" style="margin-top: 10px;"></div>
   `);
 }
@@ -3228,10 +3222,10 @@ async function doPreview() {
   const path = document.getElementById('imp-path').value.trim();
   if (!path) {
     document.getElementById('imp-preview').innerHTML =
-      '<div style="color:red">Path required.</div>';
+      `<div style="color:red">${t('imp.errPath')}</div>`;
     return;
   }
-  document.getElementById('imp-preview').innerHTML = '<div class="muted">Loading…</div>';
+  document.getElementById('imp-preview').innerHTML = `<div class="muted">${t('common.loading')}</div>`;
   const r = await fetch('/api/archive/preview', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -3240,57 +3234,102 @@ async function doPreview() {
   const data = await r.json();
   if (!r.ok) {
     document.getElementById('imp-preview').innerHTML =
-      `<div style="color:red">${escapeHtml(data.detail)}</div>`;
+      `<div style="color:red">${escapeHtml(_impErr(data))}</div>`;
     return;
   }
   const src = data.manifest.source;
   const compat = data.compatible
-    ? '<span style="color:green">✓ compatible</span>'
-    : '<span style="color:red">✗ schema mismatch</span>';
+    ? `<span style="color:green">${t('imp.pvCompatible')}</span>`
+    : `<span style="color:red">${t('imp.pvMismatch')}</span>`;
   document.getElementById('imp-preview').innerHTML = `
-    <div><b>Source:</b> ${escapeHtml(src.group)}/${escapeHtml(src.domain)}</div>
-    <div><b>Exported:</b> ${escapeHtml(data.manifest.exported_at)}</div>
-    <div><b>Schema:</b> ${escapeHtml(data.manifest.schema_version)} — ${compat}</div>
-    <div class="muted">Size: ${(data.size_bytes / 1024).toFixed(1)} KB</div>
-    <h3 style="margin-top: 8px;">Row counts</h3>
+    <div><b>${t('imp.pvSource')}</b> ${escapeHtml(src.group)}/${escapeHtml(src.domain)}</div>
+    <div><b>${t('imp.pvExported')}</b> ${escapeHtml(data.manifest.exported_at)}</div>
+    <div><b>${t('imp.pvSchema')}</b> ${escapeHtml(data.manifest.schema_version)} — ${compat}</div>
+    <div class="muted">${t('imp.pvSize')} ${(data.size_bytes / 1024).toFixed(1)} KB</div>
+    <h3 style="margin-top: 8px;">${t('imp.pvRowCounts')}</h3>
     <pre>${escapeHtml(JSON.stringify(data.manifest.row_counts, null, 2))}</pre>
   `;
 }
 
 async function doImport() {
+  const out = document.getElementById('imp-result');
   const path = document.getElementById('imp-path').value.trim();
   if (!path) {
-    document.getElementById('imp-result').innerHTML =
-      '<div style="color:red">Path required.</div>';
+    out.innerHTML = `<div style="color:red">${t('imp.errPath')}</div>`;
     return;
   }
-  const body = {
-    archive_path: path,
-    strategy: document.getElementById('imp-strategy').value,
-    dry_run: document.getElementById('imp-dry-run').checked,
-  };
-  if (!body.dry_run && body.strategy === 'overwrite') {
-    if (!confirm('Overwrite strategy is destructive. Continue?')) return;
+
+  // Step 0 — precheck: a restore dry-run reports the target's existing rows
+  // (what a replace would erase) and validates the archive, with no writes.
+  out.innerHTML = `<div class="muted">${t('imp.checking')}</div>`;
+  let pre, preData;
+  try {
+    pre = await fetch('/api/archive/import', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({archive_path: path, mode: 'restore', dry_run: true}),
+    });
+    preData = await pre.json();
+  } catch (e) {
+    out.innerHTML = `<div style="color:red">${escapeHtml(String(e))}</div>`;
+    return;
   }
-  document.getElementById('imp-result').innerHTML = '<div class="muted">Importing…</div>';
-  const r = await fetch('/api/archive/import', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(body),
-  });
-  const data = await r.json();
+  if (!pre.ok) {
+    out.innerHTML = `<div style="color:red">${escapeHtml(_impErr(preData))}</div>`;
+    return;
+  }
+  const existing = preData.existing_counts || {};
+  const existingTotal = Object.values(existing).reduce((a, b) => a + b, 0);
+
+  // Warning 1/2 — explain the replace and what will be erased.
+  const warn1 = existingTotal > 0
+    ? t('imp.warnDestructive', { n: existingTotal, tables: Object.keys(existing).length })
+    : t('imp.warnEmpty');
+  if (!confirm(warn1)) { out.innerHTML = `<div class="muted">${t('imp.cancelled')}</div>`; return; }
+
+  // Warning 2/2 — typed confirmation (always required). The typed token stays
+  // "REPLACE" in every language (it is a fixed safety keyword, not prose).
+  const typed = prompt(
+    existingTotal > 0
+      ? t('imp.finalDestructive', { n: existingTotal })
+      : t('imp.finalEmpty'),
+  );
+  if (typed !== 'REPLACE') {
+    out.innerHTML = `<div class="muted">${t('imp.cancelledReplace')}</div>`;
+    return;
+  }
+
+  // Execute the destructive restore.
+  out.innerHTML = `<div class="muted">${t('imp.restoring')}</div>`;
+  let r, data;
+  try {
+    r = await fetch('/api/archive/import', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        archive_path: path, mode: 'restore', dry_run: false, confirm_replace: true,
+      }),
+    });
+    data = await r.json();
+  } catch (e) {
+    out.innerHTML = `<div style="color:red">${escapeHtml(String(e))}</div>`;
+    return;
+  }
   if (!r.ok) {
-    document.getElementById('imp-result').innerHTML =
-      `<div style="color:red">${escapeHtml(data.detail)}</div>`;
+    out.innerHTML = `<div style="color:red">${escapeHtml(_impErr(data))}</div>`;
     return;
   }
-  const prefix = data.dry_run
-    ? '<span style="color:#888">[DRY-RUN]</span> '
-    : '<span style="color:green">✓</span> ';
-  document.getElementById('imp-result').innerHTML = `
-    <div>${prefix}strategy=<b>${escapeHtml(data.strategy)}</b></div>
+  out.innerHTML = `
+    <div><span style="color:green">✓</span> ${t('imp.restoredOk')}</div>
     <pre>${escapeHtml(JSON.stringify(data.results, null, 2))}</pre>
   `;
+}
+
+// FastAPI error detail can be a string or a structured object ({code, message}).
+function _impErr(data) {
+  const d = data && data.detail;
+  if (d && typeof d === 'object') return d.message || JSON.stringify(d);
+  return d || 'request failed';
 }
 
 // --- Unified Project setup + MCP Installer panel ------------------------

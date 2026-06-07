@@ -180,9 +180,12 @@ def fs_list(
             key=lambda p: (0 if p.is_dir() else 1, p.name.lower()),
         ):
             kind = "dir" if child.is_dir() else "file"
-            if filter == "dir" and kind != "dir":
-                continue
-            if filter == "file" and kind != "file":
+            # Directories are ALWAYS listed so the navigator can drill in;
+            # `filter` only restricts which *files* are surfaced:
+            #   dir  → hide files (the user is picking a folder)
+            #   file → show files to pick, plus dirs for navigation
+            #   all  → show everything
+            if filter == "dir" and kind == "file":
                 continue
             entries.append(_entry_for(child, kind))
     except PermissionError as exc:

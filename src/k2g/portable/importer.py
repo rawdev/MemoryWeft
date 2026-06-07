@@ -44,6 +44,23 @@ class SchemaVersionMismatch(Exception):
     """The archive's `schema_version` is incompatible with this importer."""
 
 
+class TargetNotEmpty(Exception):
+    """Restore mode hit a non-empty target without ``confirm_replace=True``.
+
+    Carries per-table existing row counts so the caller (HTTP route / UI) can
+    warn the user precisely about what a destructive replace would erase.
+    """
+
+    def __init__(self, counts: dict[str, int]) -> None:
+        self.counts = dict(counts)
+        total = sum(counts.values())
+        super().__init__(
+            f"target database is not empty ({total} rows across "
+            f"{len(counts)} table(s)); a restore would ERASE it — "
+            f"pass confirm_replace=True to proceed"
+        )
+
+
 class ConflictStrategy(str, Enum):
     SKIP = "skip"
     OVERWRITE = "overwrite"
@@ -51,6 +68,18 @@ class ConflictStrategy(str, Enum):
 
 
 _VALID_STRATEGIES = {s.value for s in ConflictStrategy}
+
+# Import modes (intent-level, above the SQL conflict strategy):
+#   merge   — legacy row-by-row, PK-conflict strategy applies (skip/overwrite/fail)
+#   restore — clone: make the target EXACTLY match the archive. Bulk insert into
+#             an empty target; a non-empty target is fully wiped first and so
+#             requires confirm_replace=True. No identity remap (that is the
+#             future "merge by name" work) — entities/tags keep archive UUIDs.
+_VALID_MODES = {"merge", "restore"}
+
+# Rows per executemany batch in restore bulk insert — bounds peak memory while
+# keeping the round-trip count low.
+_BULK_CHUNK = 1000
 
 
 # FK-safe insertion order: (table, archive_member, optional).
@@ -126,6 +155,61 @@ def _insert_sql(
     raise ValueError(f"unknown strategy: {strategy!r}")
 
 
+def _plain_insert_sql(
+    table: str,
+    columns: tuple[str, ...],
+    backend: str,
+) -> str:
+    """Bare ``INSERT INTO t (cols) VALUES (...)`` — no conflict clause.
+
+    Used by restore (clone) mode: the target is empty (or wiped first), so a
+    plain insert cannot conflict, and ``executemany`` can batch it.
+    """
+    p = paramstyle_placeholder(backend)
+    cols_sql = ", ".join(columns)
+    placeholders = ", ".join(p for _ in columns)
+    return f"INSERT INTO {table} ({cols_sql}) VALUES ({placeholders})"
+
+
+def _topo_order_by_parent(
+    rows: list[dict[str, Any]],
+    id_col: str = "id",
+    parent_col: str = "parent_id",
+) -> list[dict[str, Any]]:
+    """Order self-referential rows so each parent precedes its children.
+
+    Used for Postgres bulk restore of ``groups`` / ``context_groups`` whose
+    ``parent_id`` FK is self-referential and (on managed PG like Supabase) NOT
+    deferrable: a child can otherwise land in an earlier ``execute_values`` page
+    than its parent and trip an immediate FK check. Rows whose parent is NULL or
+    outside the set come first. Iterative (no recursion limit); cycle-safe.
+    """
+    by_id = {r.get(id_col): r for r in rows}
+    visited: set[Any] = set()
+    out: list[dict[str, Any]] = []
+    for start in rows:
+        if start.get(id_col) in visited:
+            continue
+        # Walk up the parent chain, then emit top-down (ancestor first).
+        stack: list[dict[str, Any]] = []
+        seen_local: set[Any] = set()
+        cur: dict[str, Any] | None = start
+        while cur is not None:
+            cid = cur.get(id_col)
+            if cid in visited or cid in seen_local:
+                break  # already placed, or a cycle — stop walking
+            seen_local.add(cid)
+            stack.append(cur)
+            pid = cur.get(parent_col)
+            cur = by_id.get(pid) if (pid is not None and pid != cid) else None
+        for r in reversed(stack):
+            rid = r.get(id_col)
+            if rid not in visited:
+                visited.add(rid)
+                out.append(r)
+    return out
+
+
 def _pk_exists_sql(
     table: str,
     pk_cols: tuple[str, ...],
@@ -169,26 +253,29 @@ class DomainImporter:
         *,
         strategy: str = ConflictStrategy.SKIP.value,
         dry_run: bool = False,
+        mode: str = "merge",
+        confirm_replace: bool = False,
     ) -> dict[str, Any]:
-        """Import all Tier-1 rows.
+        """Import an archive in ``merge`` (legacy) or ``restore`` (clone) mode.
 
-        Returns::
+        Returns a dict with ``manifest`` / ``dry_run`` / ``mode`` /
+        ``existing_counts`` / ``results`` (and ``strategy`` for merge).
 
-            {
-              "manifest":  ArchiveManifest,
-              "dry_run":   bool,
-              "strategy":  str,
-              "results":   {
-                  table: {"inserted": N, "skipped": N,
-                          "overwritten": N, "failed": N},
-                  ...
-              },
-            }
-
-        When ``dry_run`` is True, ``inserted`` / ``skipped`` / ``overwritten``
-        report what *would* have happened — no DB mutation occurs.
+        - ``mode="restore"`` makes the target EXACTLY match the archive. An
+          empty target is bulk-inserted; a non-empty target is fully wiped
+          first and therefore requires ``confirm_replace=True`` (otherwise
+          :class:`TargetNotEmpty` is raised so the caller can confirm). A
+          ``dry_run`` restore writes nothing and reports ``existing_counts``
+          (what a replace would erase) plus would-insert counts.
+        - ``mode="merge"`` keeps the legacy per-row PK-conflict behavior
+          (``strategy`` = skip|overwrite|fail). ``dry_run`` reports what would
+          happen with no DB mutation.
         """
-        if strategy not in _VALID_STRATEGIES:
+        if mode not in _VALID_MODES:
+            raise ValueError(
+                f"unknown mode={mode!r}; expected one of {sorted(_VALID_MODES)}",
+            )
+        if mode == "merge" and strategy not in _VALID_STRATEGIES:
             raise ValueError(
                 f"unknown strategy={strategy!r}; "
                 f"expected one of {sorted(_VALID_STRATEGIES)}",
@@ -206,6 +293,17 @@ class DomainImporter:
                     f"incompatible with this importer"
                 )
 
+            if mode == "restore":
+                return self._run_restore(
+                    r, manifest, results, dry_run=dry_run,
+                    confirm_replace=confirm_replace,
+                )
+
+            logger.info(
+                "Importing domain=%s strategy=%s dry_run=%s — large archives "
+                "can take several minutes; per-table progress follows.",
+                manifest.source.domain, strategy, dry_run,
+            )
             if dry_run:
                 self._dry_run(r, strategy, results)
             else:
@@ -220,9 +318,398 @@ class DomainImporter:
         return {
             "manifest": manifest,
             "dry_run": dry_run,
+            "mode": "merge",
             "strategy": strategy,
+            "existing_counts": {},
             "results": results,
         }
+
+    # ------------------------------------------------------------------
+    # restore (clone) mode — BP-74 follow-up
+    # ------------------------------------------------------------------
+
+    def _run_restore(
+        self,
+        reader: ArchiveReader | DirReader,
+        manifest: ArchiveManifest,
+        results: dict[str, dict[str, int]],
+        *,
+        dry_run: bool,
+        confirm_replace: bool,
+    ) -> dict[str, Any]:
+        existing = self._existing_counts()
+
+        if dry_run:
+            would = self._count_archive_rows(reader)
+            logger.info(
+                "Restore dry-run domain=%s existing=%s would_insert=%s",
+                manifest.source.domain, existing, would,
+            )
+            return {
+                "manifest": manifest,
+                "dry_run": True,
+                "mode": "restore",
+                "existing_counts": existing,
+                "results": {
+                    t: {**_empty_counts(), "inserted": n}
+                    for t, n in would.items()
+                },
+                "strategy": None,
+            }
+
+        if existing and not confirm_replace:
+            raise TargetNotEmpty(existing)
+
+        # Always wipe-then-insert. Restore must end up EXACTLY matching the
+        # archive, and globally-unique names in the archive (notably
+        # groups.name) would otherwise collide with ANY pre-existing row — even
+        # one the count probe missed. On a truly empty target the DELETEs are
+        # harmless no-ops.
+        logger.info(
+            "Restoring domain=%s (existing=%s) — wiping target then bulk-"
+            "loading the archive; per-table progress follows.",
+            manifest.source.domain, existing,
+        )
+        self._restore_graph(reader, results, wipe=True)
+        self._restore_content_store(reader, results, wipe=True)
+        self._reconcile_domain_registry()
+        logger.info(
+            "Restored domain=%s results=%s", manifest.source.domain, results,
+        )
+        return {
+            "manifest": manifest,
+            "dry_run": False,
+            "mode": "restore",
+            "existing_counts": existing,
+            "results": results,
+            "strategy": None,
+        }
+
+    def _reconcile_domain_registry(self) -> None:
+        """Make ``domain_registry`` match the restored data.
+
+        The registry is not carried in the archive, so after a full-replace
+        restore it still lists the *old* project's domains and omits the
+        archive's. Reset it to exactly the domains present in the restored rows
+        (entities ∪ events): drop stale entries, register the real ones. A
+        missing table (older schema) is a no-op.
+        """
+        conn = self._conn
+        try:
+            self._exec(conn, "DELETE FROM domain_registry")
+        except Exception:
+            try:
+                conn.rollback()  # table absent on this schema — nothing to do
+            except Exception:
+                pass
+            return
+
+        domains: set[str] = set()
+        for table in ("entities", "events"):
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    f"SELECT DISTINCT domain FROM {table} "  # noqa: S608
+                    f"WHERE domain IS NOT NULL"
+                )
+                domains.update(row[0] for row in cur.fetchall())
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            finally:
+                try:
+                    cur.close()
+                except Exception:
+                    pass
+
+        p = paramstyle_placeholder(self._backend)
+        for d in sorted(domains):
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    f"INSERT INTO domain_registry (name) VALUES ({p})", (d,),
+                )
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            finally:
+                try:
+                    cur.close()
+                except Exception:
+                    pass
+        conn.commit()
+        logger.info("Reconciled domain_registry → %s", sorted(domains))
+
+    def _existing_counts(self) -> dict[str, int]:
+        """Per-table existing row counts in the target (nonzero only).
+
+        A missing table (fresh DB, Tier-2 not yet created) counts as 0. On
+        Postgres a missing-table error aborts the shared transaction, so we
+        roll back after each failed probe to keep the connection usable.
+        """
+        out: dict[str, int] = {}
+        # Clear any aborted transaction first: on a shared Postgres connection a
+        # single prior failed statement leaves it in InFailedSqlTransaction, and
+        # then EVERY COUNT below raises and is swallowed to 0 — silently
+        # under-reporting the target as empty (the bug that skipped the wipe).
+        try:
+            self._conn.rollback()
+        except Exception:
+            pass
+        for table, _m, _o in IMPORT_ORDER:
+            n = self._safe_count(self._conn, table)
+            if n:
+                out[table] = n
+        if self._content_store is not None:
+            cs_conn = getattr(self._content_store, "_conn", None)
+            if cs_conn is not None:
+                n = self._safe_count(cs_conn, "content_store")
+                if n:
+                    out["content_store"] = n
+        return out
+
+    def _safe_count(self, conn: Any, table: str) -> int:
+        cur = None
+        try:
+            cur = conn.cursor()
+            cur.execute(f"SELECT COUNT(*) FROM {table}")  # noqa: S608 — fixed table list
+            row = cur.fetchone()
+            return int(row[0]) if row else 0
+        except Exception as exc:
+            # A missing table (fresh DB) is expected → 0. Anything else is worth
+            # a line so a silent under-count can't hide again.
+            logger.debug("existing-count probe failed for %s: %s", table, exc)
+            try:
+                conn.rollback()  # PG: clear aborted txn from the failed probe
+            except Exception:
+                pass
+            return 0
+        finally:
+            if cur is not None:
+                try:
+                    cur.close()
+                except Exception:
+                    pass
+
+    def _count_archive_rows(
+        self, reader: ArchiveReader | DirReader,
+    ) -> dict[str, int]:
+        out: dict[str, int] = {}
+        for table, member, optional in IMPORT_ORDER:
+            if optional and not reader.has_member(member):
+                continue
+            out[table] = sum(1 for _ in reader.iter_jsonl(member))
+        if reader.has_member("db/content_store.jsonl"):
+            out["content_store"] = sum(
+                1 for _ in reader.iter_jsonl("db/content_store.jsonl")
+            )
+        return out
+
+    @staticmethod
+    def _exec(conn: Any, sql: str) -> None:
+        """Run a side-effecting statement on either DB-API connection.
+
+        sqlite3 connections expose ``.execute`` directly, psycopg2 ones do
+        not — going through a cursor works for both.
+        """
+        cur = conn.cursor()
+        try:
+            cur.execute(sql)
+        finally:
+            try:
+                cur.close()
+            except Exception:
+                pass
+
+    def _restore_graph(
+        self,
+        reader: ArchiveReader | DirReader,
+        results: dict[str, dict[str, int]],
+        *,
+        wipe: bool,
+    ) -> None:
+        """Bulk-restore the graph tables (single transaction).
+
+        Self-referential rows (groups.parent_id / context_groups.parent_id)
+        can precede their parent, so FK enforcement is relaxed for the
+        duration: SQLite disables it outright (``PRAGMA foreign_keys=OFF``),
+        Postgres defers it where the schema allows. The target is clean
+        (empty, or wiped here), so a plain INSERT cannot conflict.
+        """
+        cols_map = _all_cols()
+        try:
+            if self._backend == "sqlite":
+                for _setup in ("setup_training_schema", "setup_bp30_schema"):
+                    fn = getattr(self._graph, _setup, None)
+                    if callable(fn):
+                        fn()
+                self._conn.commit()
+                self._exec(self._conn, "PRAGMA foreign_keys = OFF")
+            else:
+                # Postgres: defer FK checks where constraints are DEFERRABLE so
+                # a self-referential child/parent pair inside one bulk statement
+                # is fine. No-op (and harmless) for non-deferrable constraints.
+                try:
+                    self._exec(self._conn, "SET CONSTRAINTS ALL DEFERRED")
+                except Exception:
+                    pass
+
+            if wipe:
+                for table, _m, _o in reversed(IMPORT_ORDER):
+                    try:
+                        self._exec(self._conn, f"DELETE FROM {table}")  # noqa: S608
+                    except Exception:
+                        # Table may not exist on this target — nothing to wipe.
+                        pass
+
+            for table, member, optional in IMPORT_ORDER:
+                if optional and not reader.has_member(member):
+                    continue
+                cols = cols_map[table]
+                count = self._bulk_insert(self._conn, table, cols, reader, member)
+                results[table]["inserted"] = count
+                logger.info("  restored %s: %d rows", table, count)
+
+            self._conn.commit()
+            if self._backend == "sqlite":
+                self._exec(self._conn, "PRAGMA foreign_keys = ON")
+        except Exception:
+            self._conn.rollback()
+            if self._backend == "sqlite":
+                try:
+                    self._exec(self._conn, "PRAGMA foreign_keys = ON")
+                except Exception:
+                    pass
+            raise
+
+    def _restore_content_store(
+        self,
+        reader: ArchiveReader | DirReader,
+        results: dict[str, dict[str, int]],
+        *,
+        wipe: bool,
+    ) -> None:
+        member = "db/content_store.jsonl"
+        if self._content_store is None or not reader.has_member(member):
+            return
+        cs_conn = getattr(self._content_store, "_conn", None)
+        if cs_conn is None:
+            return
+        cols = _all_cols()["content_store"]
+        try:
+            if wipe:
+                try:
+                    self._exec(cs_conn, "DELETE FROM content_store")
+                except Exception:
+                    pass
+            count = self._bulk_insert(cs_conn, "content_store", cols, reader, member)
+            cs_conn.commit()
+            results["content_store"] = {**_empty_counts(), "inserted": count}
+        except Exception:
+            cs_conn.rollback()
+            raise
+
+    def _bulk_insert(
+        self,
+        conn: Any,
+        table: str,
+        cols: tuple[str, ...],
+        reader: ArchiveReader | DirReader,
+        member: str,
+    ) -> int:
+        """Stream a JSONL member into a clean target as a true bulk insert.
+
+        - **SQLite**: chunked ``executemany`` (the fast native path).
+        - **Postgres**: ``psycopg2.extras.execute_values`` — a single multi-row
+          ``INSERT ... VALUES (...), (...), …`` per page, turning ~N row
+          round-trips into ~N/page_size. Essential over a remote DB where each
+          round-trip carries network latency.
+        """
+        if self._backend == "sqlite":
+            return self._bulk_insert_sqlite(conn, table, cols, reader, member)
+        return self._bulk_insert_pg(conn, table, cols, reader, member)
+
+    def _bulk_insert_sqlite(
+        self,
+        conn: Any,
+        table: str,
+        cols: tuple[str, ...],
+        reader: ArchiveReader | DirReader,
+        member: str,
+        chunk: int = _BULK_CHUNK,
+    ) -> int:
+        sql = _plain_insert_sql(table, cols, "sqlite")
+        count = 0
+        cur = conn.cursor()
+        try:
+            batch: list[tuple[Any, ...]] = []
+            for row in reader.iter_jsonl(member):
+                batch.append(
+                    tuple(denormalize_for_column(c, row.get(c)) for c in cols)
+                )
+                if len(batch) >= chunk:
+                    cur.executemany(sql, batch)
+                    count += len(batch)
+                    batch = []
+            if batch:
+                cur.executemany(sql, batch)
+                count += len(batch)
+        finally:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        return count
+
+    def _bulk_insert_pg(
+        self,
+        conn: Any,
+        table: str,
+        cols: tuple[str, ...],
+        reader: ArchiveReader | DirReader,
+        member: str,
+    ) -> int:
+        from psycopg2.extras import execute_values
+
+        cols_sql = ", ".join(cols)
+        sql = f"INSERT INTO {table} ({cols_sql}) VALUES %s"  # noqa: S608
+        # Rows-per-statement under Postgres' 65535-parameter ceiling.
+        page = max(1, min(5000, 60000 // max(1, len(cols))))
+        cur = conn.cursor()
+        try:
+            if "id" in cols and "parent_id" in cols:
+                # Self-referential table (groups / context_groups): order
+                # parents before children so a child never precedes its parent
+                # across pages (the FK is immediate / non-deferrable here).
+                # These tables are small, so materializing them is fine.
+                rows = _topo_order_by_parent(list(reader.iter_jsonl(member)))
+                values = [
+                    tuple(denormalize_for_column(c, r.get(c)) for c in cols)
+                    for r in rows
+                ]
+                execute_values(cur, sql, values, page_size=page)
+                return len(values)
+
+            # Non-self-referential: stream (low memory) and count as we go.
+            count = 0
+
+            def _rows():
+                nonlocal count
+                for row in reader.iter_jsonl(member):
+                    count += 1
+                    yield tuple(denormalize_for_column(c, row.get(c)) for c in cols)
+
+            execute_values(cur, sql, _rows(), page_size=page)
+            return count
+        finally:
+            try:
+                cur.close()
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # internal
@@ -296,6 +783,11 @@ class DomainImporter:
                         cur.close()
                     except Exception:
                         pass
+                logger.info(
+                    "  imported %s: %s",
+                    table,
+                    {k: v for k, v in results[table].items() if v} or "0 rows",
+                )
             self._conn.commit()
             if self._backend == "sqlite":
                 self._conn.execute("PRAGMA foreign_keys = ON")

@@ -46,6 +46,35 @@ _DROP_HEADERS = frozenset({
 # absolute base_url to resolve the request paths the frontend sends ("/api/…").
 _BASE_URL = "http://mweft.local"
 
+# Per-request wait ceiling. Most endpoints are snappy, so a short default
+# surfaces a genuinely hung backend quickly. But a handful legitimately run for
+# minutes and must NOT be cut off at the default — a cold embedding-model load
+# alone is 2–5 min, and these can stack on top of that:
+#   * /warmup                  — embedding model cold load
+#   * /api/archive/*           — export / import / preview (bulk DB I/O)
+#   * /api/train/*             — jaccard / build pipelines
+#   * /api/auto-tags/recompute — Leiden community recompute
+#   * /api/auto-tags/stopword  — re-runs Entity Leiden + Jaccard + Event Leiden
+# Matching is substring-based so query strings don't matter.
+_DEFAULT_TIMEOUT = 120.0
+_LONG_TIMEOUT = 1800.0  # 30 min
+_LONG_RUNNING_PATHS = (
+    "/warmup",
+    "/api/archive/",
+    "/api/train/",
+    "/api/auto-tags/recompute",
+    "/api/auto-tags/stopword",
+)
+
+
+def _timeout_for(path: str) -> float:
+    """Pick the wait ceiling for a request path (long for heavy endpoints)."""
+    return (
+        _LONG_TIMEOUT
+        if any(frag in path for frag in _LONG_RUNNING_PATHS)
+        else _DEFAULT_TIMEOUT
+    )
+
 
 class AsgiBridge:
     """Run a FastAPI app in-process and expose ``request`` as a pywebview js_api."""
@@ -120,7 +149,7 @@ class AsgiBridge:
                 ),
                 self._loop,
             )
-            resp = fut.result(timeout=120)
+            resp = fut.result(timeout=_timeout_for(path))
         except Exception as exc:  # noqa: BLE001 — surface to the UI, don't crash
             logger.exception("ASGI bridge request failed: %s %s", method, path)
             msg = f"bridge error: {exc}".encode()

@@ -24,7 +24,11 @@ from k2g.core.config import get_settings
 from k2g.db_store.factory import _resolve_backend_mode
 from k2g.portable.archive_io import ArchiveReader
 from k2g.portable.exporter import DomainExporter
-from k2g.portable.importer import DomainImporter, SchemaVersionMismatch
+from k2g.portable.importer import (
+    DomainImporter,
+    SchemaVersionMismatch,
+    TargetNotEmpty,
+)
 from k2g.portable.manifest import ArchiveManifest, ArchiveOptions
 from k2g.web.deps import get_stores_dep, sanitize
 
@@ -59,9 +63,17 @@ class PreviewRequest(BaseModel):
 
 class ImportRequest(BaseModel):
     archive_path: str
+    mode: str = Field(
+        default="merge",
+        description="merge (legacy, per-row strategy) | restore (clone/replace).",
+    )
     strategy: str = Field(
         default="skip",
-        description="PK conflict strategy: skip | overwrite | fail.",
+        description="merge-mode PK conflict strategy: skip | overwrite | fail.",
+    )
+    confirm_replace: bool = Field(
+        default=False,
+        description="restore mode: required to wipe a non-empty target.",
     )
     dry_run: bool = False
 
@@ -153,6 +165,19 @@ def archive_import(
             body.archive_path,
             strategy=body.strategy,
             dry_run=body.dry_run,
+            mode=body.mode,
+            confirm_replace=body.confirm_replace,
+        )
+    except TargetNotEmpty as exc:
+        # Restore into a populated DB — caller must confirm the destructive
+        # replace. Structured detail drives the UI's typed-REPLACE warning.
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "target_not_empty",
+                "message": str(exc),
+                "existing_counts": exc.counts,
+            },
         )
     except SchemaVersionMismatch as exc:
         raise HTTPException(status_code=409, detail=str(exc))
@@ -164,7 +189,9 @@ def archive_import(
 
     return sanitize({
         "dry_run": result["dry_run"],
-        "strategy": result["strategy"],
+        "mode": result.get("mode", "merge"),
+        "strategy": result.get("strategy"),
+        "existing_counts": result.get("existing_counts", {}),
         "manifest": result["manifest"].model_dump(),
         "results": result["results"],
     })
