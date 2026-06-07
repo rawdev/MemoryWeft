@@ -270,7 +270,8 @@ def _initialize() -> None:
         logger.warning("ProjectionEngine init failed: %s", e)
         _projection_engine = None
 
-    # TemplateMiner (ETG auto-mining) -- ported to trainer.
+    # TemplateMiner (ETG auto-mining). Not shipped in every build — its absence
+    # is expected and non-fatal (the mining routes report it unavailable).
     try:
         from k2g.trainer.template_miner import TemplateMiner
 
@@ -280,6 +281,9 @@ def _initialize() -> None:
             llm_provider=_llm_provider,
             llm_model=_llm_model,
         )
+    except ModuleNotFoundError:
+        logger.info("TemplateMiner not available in this build — skipping.")
+        _template_miner = None
     except Exception as e:  # noqa: BLE001
         logger.warning("TemplateMiner init failed: %s", e)
         _template_miner = None
