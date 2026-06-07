@@ -1,4 +1,4 @@
-"""Vector2Text Web Agent dependency injection.
+"""MWeft Manager web dependency injection.
 
 Settings -> Stores -> Adapters initialization and FastAPI Depends wiring.
 """
@@ -322,7 +322,7 @@ def shutdown() -> None:
                         store.close()
                 except Exception as e:  # noqa: BLE001
                     logger.warning("Store shutdown failed [%s]: %s", name, e)
-    logger.info("Vector2Text Web Agent stores shutdown complete")
+    logger.info("MWeft Manager web stores shutdown complete")
 
 
 def get_stores_dep() -> dict[str, Any]:

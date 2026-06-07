@@ -1,1 +1,1 @@
-"""K2G Vector2Text Web Agent."""
+"""MWeft Manager web app."""

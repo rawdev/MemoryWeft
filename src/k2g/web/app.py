@@ -1,4 +1,4 @@
-"""K2G Vector2Text Web Agent — FastAPI application.
+"""MWeft Manager — FastAPI web application.
 
 Router registration, CORS middleware, and static file serving.
 """
@@ -54,8 +54,8 @@ async def lifespan(app: FastAPI):  # noqa: ANN201
 
 
 app = FastAPI(
-    title="K2G Vector2Text Agent",
-    description="K2G graph exploration and conditional event generation web agent",
+    title="MWeft Manager",
+    description="MWeft Manager — projects, memory browsing, and analysis web UI",
     version="0.1.0",
     lifespan=lifespan,
     default_response_class=SafeJSONResponse,
