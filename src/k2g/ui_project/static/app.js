@@ -4442,10 +4442,134 @@ function _fsbRender() {
   }
 }
 
+// --- First-run onboarding (explains project / domain / group / tags) -------
+// Shows once per unconfigured project; on completion it saves domain/group/tags
+// (preserving the existing embedding/backend) and warms up the embedding model.
+const _ONB_KEY = 'mweft_onboarded:';
+let _ONB_CFG = null, _ONB_SLUG = null, _ONB_DIR = '';
+
+function _onbDismissed(key) {
+  try { return !!localStorage.getItem(_ONB_KEY + (key || '')); } catch (e) { return false; }
+}
+function _onbDismiss(key) {
+  try { localStorage.setItem(_ONB_KEY + (key || ''), '1'); } catch (e) { /* ignore */ }
+}
+function _onbUnconfigured(cfg) {
+  if (!cfg || !cfg.initialized) return true;
+  const def = (v) => { const s = String(v == null ? '' : v).trim(); return s === '' || s === 'default'; };
+  const tags = Array.isArray(cfg.save_tags) ? cfg.save_tags : [];
+  return def(cfg.domain) && def(cfg.group) && tags.length === 0;
+}
+
+async function maybeShowOnboarding() {
+  let slug = null, dir = '';
+  try {
+    const proj = await fetch('/api/projects').then(r => r.json());
+    slug = proj.current_slug || null;
+    dir = proj.current_project_dir || '';
+  } catch (e) { return; }
+  const key = slug || dir;
+  if (!key || _onbDismissed(key)) return;
+  let cfg = null;
+  try {
+    const qs = slug ? `slug=${encodeURIComponent(slug)}` : `project_dir=${encodeURIComponent(dir)}`;
+    cfg = await fetch(`/api/project/config?${qs}`).then(r => r.json());
+  } catch (e) { /* treat as unconfigured */ }
+  if (!_onbUnconfigured(cfg)) return;
+  showOnboarding(cfg || {}, slug, dir);
+}
+
+function _onbClose() { const o = document.getElementById('onb-overlay'); if (o) o.remove(); }
+
+function showOnboarding(cfg, slug, dir) {
+  _ONB_CFG = cfg; _ONB_SLUG = slug; _ONB_DIR = dir;
+  const dom = escapeHtml(cfg.domain && cfg.domain !== 'default' ? cfg.domain : '');
+  const grp = escapeHtml(cfg.group && cfg.group !== 'default' ? cfg.group : 'default');
+  const tags = escapeHtml(Array.isArray(cfg.save_tags) ? cfg.save_tags.join(', ') : '');
+  const sec = (titleK, bodyK, inner) =>
+    `<div class="onb-sec"><div class="onb-h">${t(titleK)}</div><div class="onb-b">${t(bodyK)}</div>${inner || ''}</div>`;
+  const field = (id, val, labelK, phK) =>
+    `<label class="onb-l">${t(labelK)} <input type="text" id="${id}" value="${val}"${phK ? ` placeholder="${t(phK)}"` : ''}></label>`;
+  const o = document.createElement('div');
+  o.id = 'onb-overlay'; o.className = 'onb-overlay';
+  o.innerHTML = `
+    <div class="onb-card" role="dialog" aria-modal="true" aria-labelledby="onb-title">
+      <h2 id="onb-title" style="margin:0 0 4px;">${t('onb.title')}</h2>
+      <div class="muted" style="font-size:13px; margin-bottom:8px;">${t('onb.intro')}</div>
+      ${sec('onb.project.title', 'onb.project.body')}
+      ${sec('onb.domain.title', 'onb.domain.body', field('onb-domain', dom, 'onb.domain.label', 'onb.domain.ph'))}
+      ${sec('onb.group.title', 'onb.group.body', field('onb-group', grp, 'onb.group.label'))}
+      ${sec('onb.tags.title', 'onb.tags.body', field('onb-tags', tags, 'onb.tags.label', 'onb.tags.ph'))}
+      <div id="onb-msg" class="onb-msg muted"></div>
+      <div class="onb-actions">
+        <button class="onb-skip" onclick="_onbSkip()">${t('onb.skip')}</button>
+        <button class="onb-start" onclick="_onbStart()">${t('onb.start')}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(o);
+}
+
+async function _onbWarmup() {
+  const msg = document.getElementById('onb-msg');
+  if (msg) msg.innerHTML = `<span class="muted">${t('onb.warming')}</span>`;
+  try { await fetch('/warmup', { method: 'POST' }); } catch (e) { /* best-effort */ }
+}
+
+async function _onbSkip() {
+  document.querySelectorAll('#onb-overlay button').forEach((b) => { b.disabled = true; });
+  _onbDismiss(_ONB_SLUG || _ONB_DIR);
+  await _onbWarmup();                 // first run → warm the embedding model
+  _onbClose();
+}
+
+async function _onbStart() {
+  const domain = (document.getElementById('onb-domain') || {}).value.trim() || 'default';
+  const group = (document.getElementById('onb-group') || {}).value.trim() || 'default';
+  const tags = ((document.getElementById('onb-tags') || {}).value || '')
+    .split(',').map((s) => s.trim()).filter(Boolean);
+  const msg = document.getElementById('onb-msg');
+  const btns = document.querySelectorAll('#onb-overlay button');
+  btns.forEach((b) => { b.disabled = true; });
+  if (msg) msg.innerHTML = `<span class="muted">${t('onb.saving')}</span>`;
+
+  const cfg = _ONB_CFG || {};
+  const backend = (cfg.backend && cfg.backend.kind)
+    ? cfg.backend
+    : { kind: 'sqlite', data_dir: _ONB_DIR || cfg.project_dir || '' };
+  const embedding = cfg.embedding || undefined;   // round-trip effective provider (onnx)
+  try {
+    const r = await fetch('/api/project/init', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        slug: _ONB_SLUG, project_dir: cfg.project_dir || _ONB_DIR,
+        group, domain, backend, save_tags: tags, search_targets: [{ domain }],
+        embedding, force: true,
+      }),
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      if (msg) msg.innerHTML = `<span style="color:#dc2626">${escapeHtml(data.detail || 'failed')}</span>`;
+      btns.forEach((b) => { b.disabled = false; });
+      return;
+    }
+    _onbDismiss(data.slug || _ONB_SLUG || _ONB_DIR);
+    await _onbWarmup();                // first run → warm the embedding model
+    _onbClose();
+    await loadCurrentProject();
+    await loadDomains();
+    setDomain(domain);
+    showTab('summary');
+  } catch (e) {
+    if (msg) msg.innerHTML = `<span style="color:#dc2626">${escapeHtml(String(e))}</span>`;
+    btns.forEach((b) => { b.disabled = false; });
+  }
+}
+
 window.addEventListener('DOMContentLoaded', async () => {
   await loadLanguages();
   await applyLanguage(_initialLang(), { rerender: false });
   await loadCurrentProject();
   await loadDomains();
   showTab('intro');
+  maybeShowOnboarding();   // first-run: explain project/domain/group/tags, then warm up
 });
