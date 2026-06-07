@@ -16,6 +16,7 @@ function showTab(name) {
     projects: showProjectsPanel,
     'global-ai': showGlobalAiPanel,
     notice: showNoticePanel,
+    troubleshoot: showTroubleshootPanel,
   }[name];
   if (fn) fn();
 }
@@ -1883,13 +1884,7 @@ async function showIntroPanel() {
 
     <div class="card">
       <h3>${t('intro.mcp.title')}</h3>
-      <div style="font-size:13px; line-height:1.6;">${t('intro.mcp.body')}
-        <div style="margin-top:8px;">
-          <button onclick="runWarmup()">${t('intro.mcp.warmup')}</button>
-          <button onclick="showTab('settings')">${t('intro.mcp.setup')}</button>
-          <span id="warmup-out" class="muted"></span>
-        </div>
-      </div>
+      <div style="font-size:13px; line-height:1.6;">${t('intro.mcp.body')}</div>
     </div>
 
     <div class="card">
@@ -3317,6 +3312,21 @@ function showNoticePanel() {
     </div>`);
 }
 
+// External troubleshooting page embedded as an iframe (language-aware: kr/en).
+function showTroubleshootPanel() {
+  const lang = (_LANG === 'ko') ? 'kr' : 'en';
+  const url = `https://onminimum.com/troubleshooting/${lang}/`;
+  info(`
+    <div class="page wide" style="padding:0; display:flex; flex-direction:column;">
+      <div style="padding:6px 10px; display:flex; align-items:center; gap:8px;">
+        <h2 style="margin:0; font-size:16px;">${t('troubleshoot.title')}</h2>
+        <a href="${url}" target="_blank" rel="noopener" class="muted" style="font-size:12px;">↗ ${escapeHtml(url)}</a>
+      </div>
+      <iframe src="${url}" title="${escapeHtml(t('troubleshoot.title'))}"
+              style="flex:1; width:100%; min-height:calc(100vh - 150px); border:0;"></iframe>
+    </div>`);
+}
+
 // Entry point for active project setup.
 // Shared project-manager body: "register new" at the top, then the list. Used by
 // both the standalone Projects tab and the embed inside Settings → Projects.
@@ -3372,7 +3382,7 @@ async function _prRender() {
       return `<div class="pr-item">
         <div class="pr-row" data-db="${escapeHtml(dbDir)}" data-slug="${escapeHtml(p.slug)}" onclick="_prToggleSetup(this)">
           <div style="flex:1;">
-            <div><span class="pr-caret">▸</span> <b>${escapeHtml(p.name)}</b> ${badge}</div>
+            <div><span class="pr-caret">▸</span> <b>${escapeHtml(p.name)}</b> ${badge} <span class="pr-open-aff">${t('pr.rowOpen')}</span></div>
             <div class="muted" style="font-size:11px;">${t('pr.colDb')}: ${escapeHtml(dbDir)}</div>
             ${domainLine}${last}
           </div>
@@ -3388,9 +3398,9 @@ async function _prRender() {
         <div class="pr-setup-slot" hidden></div>
       </div>`;
     }).join('');
-    list.innerHTML = `<div class="card" style="padding:6px;">${rows}</div>
-      <div class="muted" style="font-size:12px; margin-top:6px;">${t('pr.openSetupHint')}</div>
-      <div class="muted" style="font-size:12px; margin-top:4px;">${t('pr.listNote')}</div>`;
+    list.innerHTML = `<div class="muted" style="font-size:12px; margin-bottom:6px;">${t('pr.openSetupHint')}</div>
+      <div class="card" style="padding:6px;">${rows}</div>
+      <div class="muted" style="font-size:12px; margin-top:6px;">${t('pr.listNote')}</div>`;
   } catch (e) {
     list.innerHTML = `<div class="card" style="color:red">${escapeHtml(String(e))}</div>`;
   }

@@ -50,6 +50,9 @@
   .pr-caret { display: inline-block; color: var(--muted); font-size: 11px;
               transition: transform .15s ease; }
   .pr-row.expanded .pr-caret { transform: rotate(90deg); }
+  .pr-open-aff { color: var(--accent); font-size: 11px; margin-left: 4px; white-space: nowrap; }
+  .pr-row:hover .pr-open-aff { text-decoration: underline; }
+  .pr-row.expanded .pr-open-aff { display: none; }
   .pr-setup-slot { padding: 12px 14px; margin: 0 2px 8px;
                    border-left: 3px solid var(--accent); background: #fafbfc;
                    border-radius: 0 6px 6px 0; }
@@ -223,6 +226,7 @@
   <button data-tab="analysis" data-i18n="nav.analysis" onclick="showTab('analysis')">Analysis</button>
   <button data-tab="settings" data-i18n="nav.settings" onclick="showTab('settings')">Settings</button>
   <button data-tab="notice" data-i18n="nav.notice" onclick="showTab('notice')">Notice</button>
+  <button data-tab="troubleshoot" data-i18n="nav.troubleshoot" onclick="showTab('troubleshoot')">Troubleshooting</button>
 </nav>
 <main id="content"></main>
 <script src="app.js"></script>
