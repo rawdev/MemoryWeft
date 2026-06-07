@@ -87,10 +87,10 @@ function info(html) { _content().innerHTML = html; }
 // --- i18n (locale files under static/locales/) -------------------------
 // To add a language: create static/locales/<code>.json and add an entry to languages.json.
 // No separate backend route needed — the static mount (/) serves the files directly.
-let _LANG = 'ko';            // current language code
+let _LANG = 'en';            // current language code
 let _I18N = {};              // key -> string (current language)
 let _LANGS = [];             // [{code, label}] — languages.json
-let _I18N_DEFAULT = 'ko';
+let _I18N_DEFAULT = 'en';
 const _LANG_STORE_KEY = 'mweft_lang';
 
 /** Translation lookup. Returns the key as-is if not found. Substitutes {token} placeholders via vars. */
@@ -108,10 +108,10 @@ async function loadLanguages() {
   try {
     const m = await fetch('/locales/languages.json', { cache: 'no-cache' }).then(r => r.json());
     _LANGS = Array.isArray(m.languages) ? m.languages : [];
-    _I18N_DEFAULT = m.default || (_LANGS[0] && _LANGS[0].code) || 'ko';
+    _I18N_DEFAULT = m.default || (_LANGS[0] && _LANGS[0].code) || 'en';
   } catch (e) {
-    _LANGS = [{ code: 'ko', label: '한국어' }];
-    _I18N_DEFAULT = 'ko';
+    _LANGS = [{ code: 'en', label: 'English' }, { code: 'ko', label: '한국어' }];
+    _I18N_DEFAULT = 'en';
   }
 }
 
@@ -140,6 +140,16 @@ function applyStaticI18n() {
   });
 }
 
+/** Populate the toolbar language picker from the loaded languages. */
+function renderLangSelect() {
+  const sel = document.getElementById('lang-select');
+  if (!sel) return;
+  sel.innerHTML = (_LANGS || []).map((l) =>
+    `<option value="${escapeHtml(l.code)}"${l.code === _LANG ? ' selected' : ''}>${escapeHtml(l.label)}</option>`,
+  ).join('');
+  sel.value = _LANG;
+}
+
 /** Switch language — load locale → persist → apply static translations → re-render current tab. */
 async function applyLanguage(code, opts) {
   const rerender = !opts || opts.rerender !== false;
@@ -148,6 +158,7 @@ async function applyLanguage(code, opts) {
   try { localStorage.setItem(_LANG_STORE_KEY, code); } catch (e) { /* ignore */ }
   document.documentElement.lang = code;
   applyStaticI18n();
+  renderLangSelect();
   if (rerender) {
     const active = document.querySelector('nav.tabs button.on');
     showTab(active ? active.dataset.tab : 'intro');
@@ -1905,9 +1916,6 @@ async function showIntroPanel() {
 // --- Page 5 — Settings (hub for existing flows) --------------------------
 
 async function showSettingsPanel() {
-  const langOpts = (_LANGS || []).map(l =>
-    `<option value="${escapeHtml(l.code)}"${l.code === _LANG ? ' selected' : ''}>${escapeHtml(l.label)}</option>`,
-  ).join('');
   info(`
     <div class="page">
     <h2>${t('settings.title')}</h2>
@@ -1945,13 +1953,6 @@ async function showSettingsPanel() {
       </div>
     </div>
 
-    <div class="card">
-      <h3>${t('settings.lang.title')}</h3>
-      <div class="muted" style="font-size:12px; margin-bottom:8px;">${t('settings.lang.desc')}</div>
-      <label style="font-size:13px;">${t('settings.lang.label')}
-        <select onchange="applyLanguage(this.value)">${langOpts}</select>
-      </label>
-    </div>
     </div>`);
   await _prRender();        // embedded project management list (register-at-top + accordion rows)
   _loadGlobalAiList();      // embedded global installed-AI matrix (read-only, below projects)

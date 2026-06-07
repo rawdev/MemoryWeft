@@ -1,7 +1,7 @@
 {
-  "default": "ko",
+  "default": "en",
   "languages": [
-    { "code": "ko", "label": "한국어" },
-    { "code": "en", "label": "English" }
+    { "code": "en", "label": "English" },
+    { "code": "ko", "label": "한국어" }
   ]
 }
