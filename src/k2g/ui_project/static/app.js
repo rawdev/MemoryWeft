@@ -3420,9 +3420,9 @@ async function _prAdd() {
     }
     document.getElementById('pr-new-name').value = '';
     await _prRender();
-    // Jump straight into the new project's inline setup so the user picks the DB
-    // folder + config right under its freshly-added row.
-    if (data.entry && data.entry.slug) _prExpandSlug(data.entry.slug);
+    // Open the start-setup (onboarding) window for the new project so the user
+    // sets its data folder + domain/group/tags right away.
+    if (data.entry && data.entry.slug) _onbForceShow(data.entry.slug);
   } catch (e) {
     out.innerHTML = `<span style="color:red">${escapeHtml(String(e))}</span>`;
   }
@@ -4447,6 +4447,7 @@ function _fsbRender() {
 // (preserving the existing embedding/backend) and warms up the embedding model.
 const _ONB_KEY = 'mweft_onboarded:';
 let _ONB_CFG = null, _ONB_SLUG = null, _ONB_DIR = '';
+let _ONB_MODE = 'active';   // 'active' = first-run for the open project; 'register' = just-registered project
 
 function _onbDismissed(key) {
   try { return !!localStorage.getItem(_ONB_KEY + (key || '')); } catch (e) { return false; }
@@ -4476,7 +4477,20 @@ async function maybeShowOnboarding() {
     cfg = await fetch(`/api/project/config?${qs}`).then(r => r.json());
   } catch (e) { /* treat as unconfigured */ }
   if (!_onbUnconfigured(cfg)) return;
+  _ONB_MODE = 'active';
   showOnboarding(cfg || {}, slug, dir);
+}
+
+/** Force the onboarding for a specific project (e.g. just registered), bypassing
+ *  the unconfigured/dismissed checks. Saves into that entry without activating. */
+async function _onbForceShow(slug, dir) {
+  let cfg = null;
+  try {
+    const qs = slug ? `slug=${encodeURIComponent(slug)}` : `project_dir=${encodeURIComponent(dir || '')}`;
+    cfg = await fetch(`/api/project/config?${qs}`).then((r) => r.json());
+  } catch (e) { cfg = {}; }
+  _ONB_MODE = 'register';
+  showOnboarding(cfg || {}, slug, dir || '');
 }
 
 function _onbClose() { const o = document.getElementById('onb-overlay'); if (o) o.remove(); }
@@ -4487,20 +4501,25 @@ function showOnboarding(cfg, slug, dir) {
   const grp = escapeHtml(cfg.group && cfg.group !== 'default' ? cfg.group : 'default');
   const tags = escapeHtml(Array.isArray(cfg.save_tags) ? cfg.save_tags.join(', ') : '');
   const kind = (cfg.backend && cfg.backend.kind) || 'sqlite';
-  const dataDirVal = escapeHtml(kind === 'sqlite'
-    ? ((cfg.backend && cfg.backend.data_dir) || cfg.data_dir || '')
-    : (cfg.data_dir || ''));
+  // Read-only only for an existing SQLite project that already has its DB folder;
+  // a new project (no folder) or Postgres must enter/choose one.
+  const existingSqliteDir = (kind === 'sqlite' && cfg.backend && cfg.backend.data_dir) ? cfg.backend.data_dir : '';
+  const dataReadonly = !!existingSqliteDir;
+  const dataDirVal = escapeHtml(existingSqliteDir || cfg.data_dir || '');
   const sec = (titleK, bodyK, inner) =>
     `<div class="onb-sec"><div class="onb-h">${t(titleK)}</div><div class="onb-b">${t(bodyK)}</div>${inner || ''}</div>`;
   const field = (id, val, labelK, phK) =>
     `<label class="onb-l">${t(labelK)} <input type="text" id="${id}" value="${val}"${phK ? ` placeholder="${t(phK)}"` : ''}></label>`;
-  // SQLite reuses the DB folder (read-only); Postgres has no folder → require one.
-  const dataSec = kind === 'postgres'
-    ? sec('onb.data.title', 'onb.data.bodyPg', field('onb-data-dir', dataDirVal, 'onb.data.label', 'onb.data.ph'))
-    : `<div class="onb-sec"><div class="onb-h">${t('onb.data.title')}</div>`
-      + `<div class="onb-b">${t('onb.data.bodySqlite')}</div>`
+  // Existing SQLite reuses its DB folder (read-only); a new project or Postgres
+  // must enter a local data folder (required).
+  const dataBodyK = dataReadonly ? 'onb.data.bodyReuse'
+    : (kind === 'postgres' ? 'onb.data.bodyPg' : 'onb.data.bodyNew');
+  const dataSec = dataReadonly
+    ? `<div class="onb-sec"><div class="onb-h">${t('onb.data.title')}</div>`
+      + `<div class="onb-b">${t(dataBodyK)}</div>`
       + `<label class="onb-l">${t('onb.data.label')} `
-      + `<input type="text" id="onb-data-dir" value="${dataDirVal}" readonly></label></div>`;
+      + `<input type="text" id="onb-data-dir" value="${dataDirVal}" readonly></label></div>`
+    : sec('onb.data.title', dataBodyK, field('onb-data-dir', dataDirVal, 'onb.data.label', 'onb.data.ph'));
   const o = document.createElement('div');
   o.id = 'onb-overlay'; o.className = 'onb-overlay';
   o.innerHTML = `
@@ -4530,8 +4549,13 @@ async function _onbWarmup() {
 async function _onbSkip() {
   document.querySelectorAll('#onb-overlay button').forEach((b) => { b.disabled = true; });
   _onbDismiss(_ONB_SLUG || _ONB_DIR);
-  await _onbWarmup();                 // first run → warm the embedding model
-  _onbClose();
+  if (_ONB_MODE === 'register') {
+    _onbClose();
+    if (typeof _prRender === 'function') await _prRender();
+  } else {
+    await _onbWarmup();              // first run → warm the embedding model
+    _onbClose();
+  }
 }
 
 async function _onbStart() {
@@ -4543,9 +4567,9 @@ async function _onbStart() {
   const msg = document.getElementById('onb-msg');
   const cfg = _ONB_CFG || {};
   const kind = (cfg.backend && cfg.backend.kind) || 'sqlite';
-  // Object storage / logs are local files even for Postgres, so a data folder is
-  // required there (SQLite reuses its DB folder).
-  if (kind === 'postgres' && !dataDir) {
+  // The data folder is where the DB (sqlite), raw memory originals and logs
+  // live — always required.
+  if (!dataDir) {
     if (msg) msg.innerHTML = `<span style="color:#dc2626">${t('onb.errData')}</span>`;
     const el = document.getElementById('onb-data-dir'); if (el) el.focus();
     return;
@@ -4575,12 +4599,18 @@ async function _onbStart() {
       return;
     }
     _onbDismiss(data.slug || _ONB_SLUG || _ONB_DIR);
-    await _onbWarmup();                // first run → warm the embedding model
-    _onbClose();
-    await loadCurrentProject();
-    await loadDomains();
-    setDomain(domain);
-    showTab('summary');
+    if (_ONB_MODE === 'register') {
+      // Newly registered project (not the active one) → refresh the list.
+      _onbClose();
+      if (typeof _prRender === 'function') await _prRender();
+    } else {
+      await _onbWarmup();             // first run of the active project → warm the model
+      _onbClose();
+      await loadCurrentProject();
+      await loadDomains();
+      setDomain(domain);
+      showTab('summary');
+    }
   } catch (e) {
     if (msg) msg.innerHTML = `<span style="color:#dc2626">${escapeHtml(String(e))}</span>`;
     btns.forEach((b) => { b.disabled = false; });

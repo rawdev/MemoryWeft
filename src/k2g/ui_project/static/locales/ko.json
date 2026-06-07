@@ -475,8 +475,9 @@
   "onb.saving": "프로젝트 설정 저장 중…",
   "onb.warming": "임베딩 모델 워밍업 중…",
   "onb.data.title": "데이터 폴더",
-  "onb.data.bodyPg": "Postgres는 그래프·벡터를 원격에 두지만, 각 메모리의 원본 본문과 로그는 로컬 파일로 저장됩니다. 저장할 폴더를 지정하세요.",
-  "onb.data.bodySqlite": "SQLite DB 폴더를 원본 본문·로그 저장에도 그대로 사용합니다 — 추가 경로 불필요.",
+  "onb.data.bodyNew": "이 프로젝트의 로컬 폴더를 지정하세요. 데이터베이스·원본 본문·로그가 여기에 저장됩니다.",
+  "onb.data.bodyPg": "Postgres는 그래프·벡터를 원격에 두지만, 각 메모리의 원본 본문과 로그는 여전히 로컬 파일입니다. 저장할 폴더를 지정하세요.",
+  "onb.data.bodyReuse": "이 프로젝트의 기존 데이터 폴더를 원본 본문·로그에도 그대로 사용합니다 — 추가 경로 불필요.",
   "onb.data.label": "로컬 데이터 폴더",
   "onb.data.ph": "예: C:\\Users\\me\\.mweft\\my-project",
   "onb.errData": "로컬 데이터 폴더를 입력하세요 — Postgres는 객체 저장소·로그가 여기 저장되므로 필수입니다."
