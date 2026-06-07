@@ -25,6 +25,7 @@ import logging
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
 
 # Eager-load heavy native deps on the main thread — FastMCP runs tool calls in
 # anyio worker threads, and the first BLAS/MKL initialisation of numpy/torch
@@ -92,6 +93,7 @@ from k2g.mcp.sql_tools import (
 )
 from k2g.mcp.temporal_tools import temporal_flow_tool
 from k2g.mcp.memory_tools import remember_tool, remember_edit_tool
+from k2g.db_store.embedding_guard import EmbeddingFingerprintMismatch
 from k2g.mcp.factory import Deps, build_dependencies, build_plan_deps
 from k2g.mcp.proxy.write_proxy import forwardable_write
 from k2g.mcp.tools import (
@@ -116,7 +118,13 @@ def _get_deps() -> Deps:
     global _deps
     if _deps is None:
         logger.info("Building MWeft MCP dependencies (graph + vector + embedding)")
-        _deps = build_dependencies()
+        try:
+            _deps = build_dependencies()
+        except EmbeddingFingerprintMismatch as exc:
+            # Deliver the exact, actionable reason to the MCP client instead of an
+            # opaque startup failure — ToolError messages are surfaced verbatim.
+            logger.error("MCP dependency build blocked: %s", exc)
+            raise ToolError(str(exc)) from exc
     return _deps
 
 
