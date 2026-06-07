@@ -669,6 +669,10 @@ async function loadScopeTags() {
              + (d ? `&domain=${encodeURIComponent(d)}` : '');
     const r = await fetch(`/api/auto-tags/scope-tags?${qs}`);
     const data = await r.json();
+    if (data && data.error) {   // surface backend errors instead of a silent empty list
+      sel.innerHTML = `<option value="">⚠ ${escapeHtml(String(data.error)).slice(0, 140)}</option>`;
+      return;
+    }
     const tags = (data && data.tags) || [];
     if (!tags.length) {
       sel.innerHTML = `<option value="">${t('an.scoped.tagNone')}</option>`;
@@ -706,9 +710,12 @@ async function runScopedExplore() {
   if (target) target.innerHTML = `<div class="muted">${t('an.computing')}</div>`;
   if (status) status.innerHTML = `<span class="sx-spinner"></span> ${t('an.computing')}`;
   try {
+    // A tag scope is cross-cutting (it spans domains), so explore its full
+    // member set — don't restrict to the currently-selected domain.
+    const isTag = String(scope).startsWith('tag:');
     const qs = `scope=${encodeURIComponent(scope)}&kind=${encodeURIComponent(kind)}`
              + `&resolution=${encodeURIComponent(res)}&theta_e=${encodeURIComponent(theta_e)}&top_n=30`
-             + (d ? `&domain=${encodeURIComponent(d)}` : '');
+             + ((!isTag && d) ? `&domain=${encodeURIComponent(d)}` : '');
     const r = await fetch(`/api/auto-tags/explore?${qs}`);
     const data = await r.json();
     if (data.error) {
@@ -771,10 +778,13 @@ async function loadScopedCommunityDetail(cid) {
   slot.innerHTML = `<div class="muted">${t('an.comm.loadingMembers')}</div>`;
   try {
     const d = domain();
+    // Match the explore call: tag scopes are cross-cutting → no domain filter
+    // (keeps the member cache key consistent with runScopedExplore).
+    const isTag = String(sc.scope || '').startsWith('tag:');
     const qs = `scope=${encodeURIComponent(sc.scope)}&community_id=${encodeURIComponent(cid)}`
              + `&kind=${encodeURIComponent(sc.kind)}&resolution=${encodeURIComponent(sc.resolution)}`
              + `&theta_e=${encodeURIComponent(sc.theta_e != null ? sc.theta_e : 0.05)}`
-             + `&max_members=50` + (d ? `&domain=${encodeURIComponent(d)}` : '');
+             + `&max_members=50` + ((!isTag && d) ? `&domain=${encodeURIComponent(d)}` : '');
     const r = await fetch(`/api/auto-tags/explore/members?${qs}`);
     const data = await r.json();
     if (data.error) {

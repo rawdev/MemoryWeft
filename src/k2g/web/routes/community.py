@@ -672,19 +672,21 @@ def scope_tags(
     if not sources:
         return {"domain": domain, "kind": kind, "tags": []}
     try:
+        q_rollback(conn)  # recover if a prior query left the shared connection's transaction aborted
         ph = _ph(conn)
         marks = ",".join([ph] * len(sources))
         params: list[Any] = list(sources)
-        dom_clause = ""
-        if domain:
-            dom_clause = f" AND g.domain = {ph}"
-            params.append(domain)
+        # Discovery/save tags are cross-cutting: one global tag spans domains
+        # (groups.name is globally unique, and the live save path links events
+        # from any domain to the same tag). So we do NOT filter by the group's
+        # home ``domain`` — a cross-cutting tag must appear in every domain's
+        # scope picker. ``domain`` is accepted for compatibility but not filtered.
         sql = (
             "SELECT g.id, g.name, g.source, "
             "  (SELECT COUNT(DISTINCT em.event_id) FROM event_member_of em "
             "   WHERE em.group_id = g.id) AS n "
             "FROM groups g "
-            f"WHERE g.source IN ({marks}){dom_clause} "
+            f"WHERE g.source IN ({marks}) "
             "ORDER BY n DESC LIMIT 200"
         )
         rows = q_all(conn, sql, params)
