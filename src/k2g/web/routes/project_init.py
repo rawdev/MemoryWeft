@@ -126,7 +126,10 @@ def get_project_config(project_dir: str = "", slug: str = "") -> dict[str, Any]:
         })
     is_pg = (entry.backend == "postgres") or bool(entry.postgres_dsn)
     emb = entry.embedding or {}
-    model = str(emb.get("model") or "BAAI/bge-m3")
+    # Report the EFFECTIVE model: when the entry leaves it unset the runtime
+    # falls back to the deployment env (the portable bundle sets EMBEDDING_*),
+    # so the setup form/onboarding must round-trip that, not a hard-coded value.
+    model = str(emb.get("model") or os.environ.get("EMBEDDING_MODEL") or "BAAI/bge-m3")
     return sanitize({
         "initialized": True,
         "project_dir": entry.project_dir,
@@ -141,7 +144,10 @@ def get_project_config(project_dir: str = "", slug: str = "") -> dict[str, Any]:
             {"kind": "sqlite", "data_dir": entry.db_dir or entry.project_dir}
         ),
         "embedding": {
-            "provider": str(emb.get("provider") or "local"),
+            # EFFECTIVE provider: an unset entry falls back to the env provider
+            # (onnx in the portable bundle). Reporting 'local' here would make a
+            # save persist 'local' and defeat that fallback — re-breaking onnx.
+            "provider": str(emb.get("provider") or os.environ.get("EMBEDDING_PROVIDER") or "local"),
             "model": model,
             "dim": emb.get("dim") or resolve_embedding_dim(model),
         },
