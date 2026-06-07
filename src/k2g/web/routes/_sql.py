@@ -123,4 +123,24 @@ def q_exec(conn: Any, sql: str, args: tuple = ()) -> int:
             pass
 
 
-__all__ = ["q", "q_one", "q_all", "q_exec", "cursor", "is_pg", "ph", "not_deprecated"]
+def q_rollback(conn: Any) -> None:
+    """Roll back a Postgres connection left in an aborted transaction.
+
+    A shared psycopg2 connection (``autocommit=False``) is poisoned by any failed
+    statement: every later command then raises ``InFailedSqlTransaction`` until a
+    rollback. Call this before standalone DDL and in route error handlers so one
+    failed statement does not break later requests. PG-only + best-effort, so it
+    never discards a pending SQLite write transaction.
+    """
+    if not _is_pg(conn):
+        return
+    try:
+        conn.rollback()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+__all__ = [
+    "q", "q_one", "q_all", "q_exec", "q_rollback",
+    "cursor", "is_pg", "ph", "not_deprecated",
+]

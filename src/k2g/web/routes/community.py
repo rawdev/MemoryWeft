@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, Query
 
 from k2g.web.deps import get_db_dep, sanitize
 from k2g.trainer.community_freshness import resolve_latest_run
-from k2g.web.routes._sql import q_all, q_exec, q_one
+from k2g.web.routes._sql import q_all, q_exec, q_one, q_rollback
 
 logger = logging.getLogger(__name__)
 
@@ -218,6 +218,10 @@ def _ph(conn: Any) -> str:
 
 
 def _ensure_analysis_param_table(conn: Any) -> None:
+    # Self-heal: a shared psycopg2 connection may have been left in an aborted
+    # transaction by an earlier failed statement, which would make this DDL raise
+    # InFailedSqlTransaction. Roll that back first (PG-only, no-op on SQLite).
+    q_rollback(conn)
     ddl = _ANALYSIS_PARAM_DDL_PG if _is_postgres(conn) else _ANALYSIS_PARAM_DDL_SQLITE
     q_exec(conn, ddl)
     if hasattr(conn, "commit"):
@@ -264,6 +268,7 @@ def get_analysis_params(
             row = q_one(conn, sql)
     except Exception as exc:  # noqa: BLE001
         logger.exception("analysis/params GET failed: %s", exc)
+        q_rollback(conn)  # don't leave the shared connection poisoned for the next request
         return {
             "domain": domain, "params": DEFAULTS,
             "saved_at": None, "is_default": True,
@@ -335,6 +340,7 @@ def save_analysis_params(
             conn.commit()
     except Exception as exc:  # noqa: BLE001
         logger.exception("analysis/params POST failed: %s", exc)
+        q_rollback(conn)  # don't leave the shared connection poisoned for the next request
         return {"error": str(exc)}
     return sanitize({"domain": domain, "params": params, "saved": True})
 
