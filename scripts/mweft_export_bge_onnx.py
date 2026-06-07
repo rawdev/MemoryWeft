@@ -38,6 +38,31 @@ def _die(msg: str, code: int = 2) -> None:
     sys.exit(code)
 
 
+def _hf_retry(fn, *, attempts: int = 6, base: float = 8.0):
+    """Call ``fn`` with exponential backoff on transient Hugging Face Hub errors.
+
+    HF rate-limits unauthenticated traffic from shared CI IPs with HTTP 429,
+    which otherwise fails the whole release at the model/tokenizer fetch. Retry
+    a handful of times (8s, 16s, 32s, 64s, 128s) so a transient burst clears.
+    """
+    import time
+
+    for i in range(attempts):
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001
+            text = str(e)
+            transient = any(s in text for s in ("429", "Too Many Requests", "503", "504")) \
+                or "ratelimit" in text.lower().replace(" ", "")
+            if not transient or i == attempts - 1:
+                raise
+            wait = base * (2 ** i)
+            first = (text.splitlines()[0] if text else type(e).__name__)[:90]
+            print(f"[export] transient HF error ({first}); "
+                  f"retry {i + 1}/{attempts - 1} in {wait:.0f}s", file=sys.stderr)
+            time.sleep(wait)
+
+
 def export(model: str, out: Path, opset: int) -> None:
     try:
         from optimum.onnxruntime import ORTModelForFeatureExtraction
@@ -48,10 +73,10 @@ def export(model: str, out: Path, opset: int) -> None:
             "pip install 'optimum[onnxruntime]' transformers torch"
         )
     print(f"[export] {model} -> ONNX (opset={opset}) ...")
-    m = ORTModelForFeatureExtraction.from_pretrained(model, export=True)
+    m = _hf_retry(lambda: ORTModelForFeatureExtraction.from_pretrained(model, export=True))
     out.mkdir(parents=True, exist_ok=True)
     m.save_pretrained(out)
-    AutoTokenizer.from_pretrained(model).save_pretrained(out)
+    _hf_retry(lambda: AutoTokenizer.from_pretrained(model)).save_pretrained(out)
     # optimum saves as model.onnx. Confirm tokenizer.json exists.
     if not (out / "model.onnx").is_file():
         # Some versions use a different name -> normalize the first .onnx to model.onnx

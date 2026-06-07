@@ -23,6 +23,11 @@ jobs:
           python-version: "3.11"
       - id: ver
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Cache the Hugging Face hub download (avoids re-fetch / 429 on re-run)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-bge-m3-${{ runner.os }}
       - name: Install export deps (build-time only)
         run: pip install "optimum[onnxruntime]" transformers torch
       - name: Export BGE-M3 to ONNX (int8)
