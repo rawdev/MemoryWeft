@@ -287,6 +287,11 @@ def create_tag(
         source="mweft_save_tag",
     )
     graph.set_user_tag("group", tag_id, "user_created")
+    # link_or_create_group's ON CONFLICT(name) leaves a pre-existing tag's source
+    # untouched — promote it so re-adding a Manager save-tag always lands on the
+    # Discovery axis (BP-96), not just on first creation.
+    if hasattr(graph, "set_group_source"):
+        graph.set_group_source(tag_id, "mweft_save_tag")
 
     return {"id": tag_id, "name": name, "lifecycle": "user_created"}
 

@@ -617,6 +617,19 @@ class PostgresGraphStore:
         self._conn.commit()
         return row["id"] if isinstance(row, dict) else row[0]
 
+    def set_group_source(self, group_id: str, source: str) -> None:
+        """Set a group's provenance ``source`` (axis label).
+
+        Used to promote a Manager-added tag to the Discovery axis even when
+        ``link_or_create_group``'s ON CONFLICT left a pre-existing row's source
+        untouched.
+        """
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "UPDATE groups SET source = %s WHERE id = %s", (source, group_id),
+            )
+        self._conn.commit()
+
     def register_path_group_with_ancestors(
         self,
         leaf_canonical: str,
