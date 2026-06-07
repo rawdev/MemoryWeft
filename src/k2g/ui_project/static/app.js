@@ -3294,7 +3294,7 @@ async function doImport() {
 // and an external notice page embedded as an iframe (language-aware: kr/en).
 function showNoticePanel() {
   const lang = (_LANG === 'ko') ? 'kr' : 'en';
-  const url = `https://onminimum.com/notice/${lang}`;
+  const url = `https://onminimum.com/notice/mw/${lang}`;
   info(`
     <div class="page wide" style="padding:0; display:flex; flex-direction:column;">
       <div style="padding:6px 10px; display:flex; align-items:center; gap:8px;">
