@@ -968,6 +968,13 @@ class Settings(BaseSettings):
         data_dir = values.get("data_dir", "./data")
         if isinstance(data_dir, str) and "#" in data_dir:
             data_dir = data_dir.split("#")[0].strip()
+        # An empty DATA_DIR would make the sub-paths below "/objects", "/logs",
+        # … which resolve to the *drive root* (e.g. F:\objects). Fall back to the
+        # default so local object storage / logs always land in a real folder —
+        # e.g. a Postgres project whose entry carries no local anchor.
+        if not isinstance(data_dir, str) or not data_dir.strip():
+            data_dir = "./data"
+            values["data_dir"] = data_dir
 
         _defaults = {
             "sqlite_path": "content_store.db",

@@ -186,8 +186,12 @@ def init_project(
         if not dsn.startswith(("postgres://", "postgresql://")):
             raise HTTPException(
                 status_code=400, detail="postgres dsn must start with 'postgresql://'")
-        # Postgres has no data folder — anchor on project_dir.
-        db_dir = proj_dir
+        # Postgres has no data folder — anchor object storage/logs on
+        # project_dir. Preserve the existing local anchor when none is supplied,
+        # so a re-save (e.g. the first-run onboarding) doesn't empty it and make
+        # object storage resolve to the drive root.
+        _ex = get_project(body.slug) if body.slug else None
+        db_dir = proj_dir or ((_ex.db_dir or _ex.project_dir) if _ex else "")
         backend_kind = "postgres"
         postgres_dsn = dsn
 
