@@ -155,3 +155,35 @@ def config_path(
         return None
 
     return None
+
+
+def mirror_config_paths(
+    client_slug: str,
+    *,
+    project_dir: str | Path | None = None,
+    platform: Platform | None = None,
+) -> list[Path]:
+    """Extra config paths to keep in sync with :func:`config_path` (best-effort).
+
+    Only a Store/MSIX Claude Desktop has two locations: the app reads the
+    package-local LocalCache copy (returned by ``config_path``), while the plain
+    ``%APPDATA%\\Claude`` copy is mirrored too so the two never diverge (avoids
+    the stale-config confusion where one is edited but the app reads the other).
+
+    Empty for every other client: their ``config_path`` is the only real location
+    (Codex ``~/.codex``, Cursor ``~/.cursor``, Gemini ``~/.gemini``, Continue
+    ``~/.continue``, Claude Code ``<proj>/.mcp.json`` are plain home/project paths,
+    not AppData-virtualised, so no mirror is needed).
+    """
+    plat = platform or detect_platform()
+    if client_slug != "claude_desktop" or plat != "windows":
+        return []
+    primary = config_path(client_slug, project_dir=project_dir, platform=plat)
+    msix = _msix_claude_config()
+    if msix is None or primary != msix:
+        return []  # direct-download install — %APPDATA% IS the primary, no mirror
+    ad = _appdata()
+    if ad is None:
+        return []
+    appdata_cfg = ad / "Claude" / "claude_desktop_config.json"
+    return [appdata_cfg] if appdata_cfg != primary else []

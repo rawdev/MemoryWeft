@@ -26,7 +26,7 @@ from k2g.installer.clients import (
     available_clients,
     get_client_spec,
 )
-from k2g.installer.locator import config_path
+from k2g.installer.locator import config_path, mirror_config_paths
 from k2g.installer.prompts import (
     backup_file_once,
     install_prompt,
@@ -514,6 +514,20 @@ def _process_one(
 
     cr.status = "applied" if operation == "install" else "removed"
     cr.detail = f"wrote {path}"
+    # Mirror to extra paths (Store/MSIX Claude: the plain %APPDATA%\Claude copy)
+    # so the app-read copy and the plain copy never diverge. Best-effort — the
+    # primary already succeeded; each mirror keeps its own other-servers (only
+    # the mweft entry is synced).
+    for mirror in mirror_config_paths(spec.slug, project_dir=project_dir):
+        try:
+            mbody = (
+                spec.upsert(_read_json(mirror), server_block)
+                if operation == "install" else spec.remove(_read_json(mirror))
+            )
+            backup_file_once(mirror)
+            _atomic_write_json(mirror, mbody)
+        except (OSError, PermissionError):
+            pass  # mirror is best-effort; the primary write already succeeded
     _attach_prompt_result(cr, project_dir=project_dir,
                           dry_run=dry_run, operation=operation)
     return cr
