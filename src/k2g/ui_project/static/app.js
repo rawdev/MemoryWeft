@@ -1898,6 +1898,11 @@ async function showIntroPanel() {
     </div>
 
     <div class="card">
+      <h3>${t('intro.pg.title')}</h3>
+      <div style="font-size:13px; line-height:1.6;">${t('intro.pg.body')}</div>
+    </div>
+
+    <div class="card">
       <h3>${t('intro.org.title')}</h3>
       <div style="font-size:13px; line-height:1.6;">${t('intro.org.body')}</div>
     </div>
@@ -4226,6 +4231,7 @@ async function _psInstallAI(slug) {
     // the list stays user-managed).
     const applied = (data.clients || []).find(c => c.slug === slug);
     if (applied && applied.path) { ai.config_path = applied.path; _renderAiClients(); }
+    _loadGlobalAiList();   // refresh the global-AI matrix in place (was stale until restart)
   } catch (e) {
     out.innerHTML = `<div style="color:red">${escapeHtml(String(e))}</div>`;
   }
@@ -4250,6 +4256,7 @@ async function _psRemoveAI(slug, label) {
     _PS_AI = _PS_AI.filter(c => c.slug !== slug);
     await _persistAiClients();   // add/remove = the only list mutations
     _renderAiClients();
+    _loadGlobalAiList();   // refresh the global-AI matrix in place (was stale until restart)
   } catch (e) {
     out.innerHTML = `<div style="color:red">${escapeHtml(String(e))}</div>`;
   }
@@ -4301,6 +4308,7 @@ async function _psApplyAllMCP() {
       .map(c => (_PS_CLIENTS.find(x => x.slug === c.slug) || {}).label || c.slug);
     if (globals.length) _psRenderRestartBanner(globals, out);
     _renderAiClients();
+    _loadGlobalAiList();   // refresh the global-AI matrix in place (was stale until restart)
   } catch (e) {
     out.innerHTML = `<div style="color:red">${escapeHtml(String(e))}</div>`;
   }
