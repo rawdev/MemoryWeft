@@ -17,6 +17,7 @@ import psycopg2.extras
 from psycopg2.extensions import connection as PgConnection
 
 from k2g.core.models import ContentRecord, new_content_id
+from k2g.db_store.postgres.reconnect import KEEPALIVE_KWARGS, ReconnectingConnMixin
 
 logger = logging.getLogger(__name__)
 
@@ -42,17 +43,13 @@ _CREATE_INDEXES_SQL = [
 ]
 
 
-class PostgresContentStore:
+class PostgresContentStore(ReconnectingConnMixin):
     """PostgreSQL-based content store managing the content_store table."""
 
     def __init__(self, dsn: str) -> None:
         self._dsn = dsn
         logger.info("PostgreSQL content store initialising")
-        self._conn: PgConnection = psycopg2.connect(
-            dsn,
-            cursor_factory=psycopg2.extras.RealDictCursor,
-        )
-        self._conn.autocommit = False
+        self._conn = self._new_connection()
         # Skip schema setup in read-only MCP environments
         # (same flag as the graph store — 2026-05-12 incident).
         import os
@@ -225,10 +222,23 @@ class PostgresContentStore:
             logger.error("PostgreSQL connection failed: %s", e)
             return False
 
+    def _new_connection(self) -> PgConnection:
+        """Fresh autocommit-off RealDictCursor connection with keepalives.
+
+        Used at init and by ``ReconnectingConnMixin`` to recover from a
+        managed-PG idle drop (Neon scale-to-zero, Supabase pooler, etc.).
+        """
+        conn = psycopg2.connect(
+            self._dsn,
+            cursor_factory=psycopg2.extras.RealDictCursor,
+            **KEEPALIVE_KWARGS,
+        )
+        conn.autocommit = False
+        return conn
+
     def close(self) -> None:
         """Close the connection."""
-        if hasattr(self, "_conn") and self._conn and not self._conn.closed:
-            self._conn.close()
+        if self._close_conn():
             logger.info("PostgreSQL connection closed")
 
     def __del__(self) -> None:

@@ -17,6 +17,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 
 from k2g.core.models import VectorMetadata
+from k2g.db_store.postgres.reconnect import KEEPALIVE_KWARGS, ReconnectingConnMixin
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ def _to_native_float_list(vector) -> list[float]:
     return [float(v) for v in vector]
 
 
-class PgVectorStore:
+class PgVectorStore(ReconnectingConnMixin):
     """Postgres + pgvector VectorStore.
 
     Shares the same DB as PostgresGraphStore. events.embedding /
@@ -55,16 +56,7 @@ class PgVectorStore:
         self._collection = collection
         self._dim = dim
 
-        self._conn = psycopg2.connect(dsn, cursor_factory=RealDictCursor)
-        self._conn.autocommit = False
-
-        try:
-            from pgvector.psycopg2 import register_vector
-            register_vector(self._conn)
-        except ImportError as e:
-            raise RuntimeError(
-                "pgvector package required. pip install 'pgvector>=0.3.0,<0.5.0'"
-            ) from e
+        self._conn = self._new_connection()
 
         logger.info(
             "PgVectorStore init: dsn=%s, collection=%s, dim=%d",
@@ -482,6 +474,25 @@ class PgVectorStore:
             "backend": "postgres+pgvector",
         }
 
+    def _new_connection(self):
+        """Open a fresh pgvector-registered connection with keepalives.
+
+        Re-registers the pgvector adapter on every (re)connect so a managed-PG
+        idle-drop recovery keeps automatic list[float] <-> vector binding.
+        """
+        conn = psycopg2.connect(
+            self._dsn, cursor_factory=RealDictCursor, **KEEPALIVE_KWARGS
+        )
+        conn.autocommit = False
+        try:
+            from pgvector.psycopg2 import register_vector
+            register_vector(conn)
+        except ImportError as e:
+            raise RuntimeError(
+                "pgvector package required. pip install 'pgvector>=0.3.0,<0.5.0'"
+            ) from e
+        return conn
+
     def ping(self) -> bool:
         try:
             with self._conn.cursor() as cur:
@@ -493,8 +504,7 @@ class PgVectorStore:
             return False
 
     def close(self) -> None:
-        if hasattr(self, "_conn") and self._conn and not self._conn.closed:
-            self._conn.close()
+        if self._close_conn():
             logger.info("PgVectorStore connection closed")
 
     def __del__(self) -> None:

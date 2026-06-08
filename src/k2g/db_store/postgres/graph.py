@@ -18,6 +18,7 @@ from psycopg2.extensions import connection as PgConnection
 
 from k2g.core.config import DomainConfig
 from k2g.db_store.graph_backend import SequentialSource
+from k2g.db_store.postgres.reconnect import KEEPALIVE_KWARGS, ReconnectingConnMixin
 from k2g.db_store.postgres.schema import (
     CREATE_AUDIT_INDEXES_SQL,
     CREATE_AUDIT_TABLES_SQL,
@@ -152,7 +153,7 @@ def _normalize_timestamp(timestamp: Any) -> str | None:
 # ============================================================================
 
 
-class PostgresGraphStore:
+class PostgresGraphStore(ReconnectingConnMixin):
     """Postgres + pgvector GraphStore (Phase 1b complete, 2026-04-26).
 
     Structurally satisfies GraphStoreProtocol.  All Tier 1/2a/2b methods
@@ -184,11 +185,7 @@ class PostgresGraphStore:
         self._embedding_dim = int(embedding_dim)
         self._embedding_model = embedding_model
         logger.info("PostgresGraphStore init: dim=%d", self._embedding_dim)
-        self._conn: PgConnection = psycopg2.connect(
-            dsn,
-            cursor_factory=psycopg2.extras.RealDictCursor,
-        )
-        self._conn.autocommit = False
+        self._conn = self._new_connection()
         # In read-only MCP environments the schema setup can be skipped to
         # avoid ALTER lock contention against a Supabase pooler, which
         # caused first-call hangs (2026-05-12 incident).
@@ -211,6 +208,20 @@ class PostgresGraphStore:
             # Block opening with an incompatible embedding dim/model — mixing
             # vector dimensions/models in one store silently corrupts search.
             self._check_embedding_fingerprint()
+
+    def _new_connection(self) -> PgConnection:
+        """Open a fresh autocommit-off RealDictCursor connection with keepalives.
+
+        Used at init and by ``ReconnectingConnMixin`` to transparently recover
+        from a managed-PG idle drop (Neon scale-to-zero, Supabase pooler, etc.).
+        """
+        conn = psycopg2.connect(
+            self._dsn,
+            cursor_factory=psycopg2.extras.RealDictCursor,
+            **KEEPALIVE_KWARGS,
+        )
+        conn.autocommit = False
+        return conn
 
     def _check_embedding_fingerprint(self) -> None:
         """Stamp (first open) or verify (later opens) the embedding fingerprint.
@@ -3133,9 +3144,8 @@ class PostgresGraphStore:
             return False
 
     def close(self) -> None:
-        if hasattr(self, "_conn") and self._conn and not self._conn.closed:
-            try:
-                self._conn.close()
+        try:
+            if self._close_conn():
                 logger.info("PostgresGraphStore connection closed")
-            except psycopg2.Error as exc:
-                logger.warning("PostgresGraphStore close error: %s", exc)
+        except psycopg2.Error as exc:
+            logger.warning("PostgresGraphStore close error: %s", exc)

@@ -164,6 +164,24 @@ def get_project_config(project_dir: str = "", slug: str = "") -> dict[str, Any]:
     })
 
 
+def _same_path(a: str | None, b: str | None) -> bool:
+    """Case/sep-insensitive path equality (Windows-safe). None-tolerant."""
+    if not a or not b:
+        return a == b
+    return os.path.normcase(os.path.normpath(a)) == os.path.normcase(os.path.normpath(b))
+
+
+def _db_locked() -> None:
+    """Reject a DB-location change on an already-initialised project."""
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            "DB location is locked for an initialised project. To use a "
+            "different database, register a new project."
+        ),
+    )
+
+
 @router.post("/project/init")
 def init_project(
     body: ProjectInitRequest = Body(...),
@@ -214,6 +232,20 @@ def init_project(
             project_dir=proj_dir or db_dir, db_dir=db_dir,
         )
         slug = created.slug
+
+    # DB-location lock: an already-initialised project (``backend`` set) may not
+    # have its backend / data_dir / DSN re-pointed. Silently switching a live
+    # project to a different (often empty, un-initialised) database breaks it —
+    # to use a different DB, register a new project. Non-location fields
+    # (domain / group / tags / embedding) stay editable while the DB is unchanged.
+    if existing is not None and existing.backend:
+        if existing.backend != backend_kind:
+            _db_locked()
+        elif backend_kind == "sqlite":
+            if not _same_path(existing.db_dir, db_dir):
+                _db_locked()
+        elif (existing.postgres_dsn or "") != (postgres_dsn or ""):
+            _db_locked()
 
     # Data-loss guard: the form has no search_targets editor. Preserve existing
     # targets when none sent; else default to [{domain}].

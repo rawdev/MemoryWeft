@@ -3658,15 +3658,16 @@ async function showProjectSetupPanel(initialProjectDir, slug, targetEl) {
 
     <div style="margin: 6px 0;">
       <b>Backend:</b><br>
-      <label><input type="radio" name="ps-backend" value="sqlite" ${backendKind === 'sqlite' ? 'checked' : ''} onchange="_psToggleBackend()"> ${t('ps.sqlite')}</label><br>
-      <label><input type="radio" name="ps-backend" value="postgres" ${backendKind === 'postgres' ? 'checked' : ''} onchange="_psToggleBackend()"> ${t('ps.postgres')}</label>
+      <label><input type="radio" name="ps-backend" value="sqlite" ${backendKind === 'sqlite' ? 'checked' : ''} ${initialized ? 'disabled' : ''} onchange="_psToggleBackend()"> ${t('ps.sqlite')}</label><br>
+      <label><input type="radio" name="ps-backend" value="postgres" ${backendKind === 'postgres' ? 'checked' : ''} ${initialized ? 'disabled' : ''} onchange="_psToggleBackend()"> ${t('ps.postgres')}</label>
     </div>
+    ${initialized ? `<div class="muted" style="font-size:11px; margin:-2px 0 6px; color:#b45309;">🔒 ${t('ps.dbLocked')}</div>` : ''}
 
     <div id="ps-sqlite-row" style="margin: 6px 0;">
       <label>${t('ps.dataDir')}<br>
         <span style="display:flex; gap:4px;">
-          <input type="text" id="ps-data-dir" value="${escapeHtml(sqliteDataDir)}" placeholder="C:\\MWEFT\\mydata" style="flex:1">
-          <button type="button" onclick="_psPickDataDir()" title="Browse">📁</button>
+          <input type="text" id="ps-data-dir" value="${escapeHtml(sqliteDataDir)}" placeholder="C:\\MWEFT\\mydata" style="flex:1" ${initialized ? 'disabled' : ''}>
+          ${initialized ? '' : '<button type="button" onclick="_psPickDataDir()" title="Browse">📁</button>'}
         </span>
       </label>
       <div class="muted" style="font-size:11px; margin-top:4px;">${t('ps.dataDirNote')}</div>
@@ -3674,7 +3675,7 @@ async function showProjectSetupPanel(initialProjectDir, slug, targetEl) {
 
     <div id="ps-pg-row" style="margin: 6px 0; display:none;">
       <label>Postgres DSN:<br>
-        <input type="text" id="ps-dsn" value="${escapeHtml(pgDsn)}" placeholder="postgresql://user:pass@host:5432/dbname" style="width:100%">
+        <input type="text" id="ps-dsn" value="${escapeHtml(pgDsn)}" placeholder="postgresql://user:pass@host:5432/dbname" style="width:100%" ${initialized ? 'disabled' : ''}>
       </label>
       <div class="muted" style="font-size:11px; margin-top:4px;">${t('ps.pgNote')}</div>
       <div style="font-size:11px; margin-top:4px; color:#b45309; background:#fffbe6; border:1px solid #f0c000; border-radius:4px; padding:6px;">

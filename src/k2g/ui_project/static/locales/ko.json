@@ -440,6 +440,7 @@
   "ps.addTagErr": "(태그 로드 실패)",
   "ps.sqlite": "SQLite (단일 사용자, 로컬 파일)",
   "ps.postgres": "Postgres (다중 사용자, DSN 필요)",
+  "ps.dbLocked": "DB 위치는 잠겨 있습니다 (backend·data_dir·DSN). 다른 DB를 쓰려면 새 프로젝트로 등록하세요 — 실행 중 DB를 빈 DB로 바꾸면 초기화가 안 됩니다.",
   "ps.dataDir": "Data directory (SQLite DB 위치 — project_dir 와 분리 권장):",
   "ps.dataDirNote": "Cloud-synced 폴더 (Drive / OneDrive) 는 SQLite WAL 손상 위험 — 로컬 디스크 권장.",
   "ps.pgNote": "PG 모드는 graph + vector + content 모두 PG. data_dir 불필요.",

@@ -440,6 +440,7 @@
   "ps.addTagErr": "(failed to load tags)",
   "ps.sqlite": "SQLite (single user, local file)",
   "ps.postgres": "Postgres (multi-user, DSN required)",
+  "ps.dbLocked": "DB location is locked (backend / data_dir / DSN). To use a different DB, register a new project — re-pointing a live project at an empty DB leaves it un-initialised.",
   "ps.dataDir": "Data directory (SQLite DB location — keep separate from project_dir):",
   "ps.dataDirNote": "Cloud-synced folders (Drive / OneDrive) risk SQLite WAL corruption — local disk recommended.",
   "ps.pgNote": "PG mode keeps graph + vector + content all in PG. No data_dir needed.",
