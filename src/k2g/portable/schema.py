@@ -102,6 +102,42 @@ PLAN_NEXT_COLUMNS: tuple[str, ...] = (
 
 REALIZED_AS_COLUMNS: tuple[str, ...] = ("from_id", "from_kind", "event_id")
 
+
+# --- Derived column lists (jaccard / community / training) ----------------
+# Carried in the archive so a migration is lossless (no post-import recompute
+# of jaccard + leiden communities). All optional — older archives omit them.
+
+EVENT_JACCARD_CONNECTED_COLUMNS: tuple[str, ...] = (
+    "a_id", "b_id", "entity_jaccard", "group_jaccard",
+    "entity_intersection", "group_intersection", "created_at",
+)
+
+ENTITY_EMBEDDING_META_COLUMNS: tuple[str, ...] = (
+    "entity_id", "computed_at", "method", "ref_event_count", "domain",
+    "entity_name", "updated_at", "coherence",
+)
+
+TRAIN_RUN_COLUMNS: tuple[str, ...] = (
+    "id", "kind", "domain", "started_at", "finished_at", "status",
+    "event_count", "entity_count", "edge_count", "params_json", "metrics_json",
+    "rows_written", "error_text", "notes", "triggered_by",
+)
+
+ENTITY_COMMUNITY_ASSIGNMENT_COLUMNS: tuple[str, ...] = (
+    "run_id", "entity_id", "community_id",
+)
+
+EVENT_COMMUNITY_ASSIGNMENT_COLUMNS: tuple[str, ...] = (
+    "run_id", "event_id", "community_id",
+)
+
+# id is BIGSERIAL — omitted so a restore regenerates it (the cache is keyed by
+# its UNIQUE(domain, signature, model, format) and never FK-referenced).
+CLUSTER_NARRATIVE_CACHE_COLUMNS: tuple[str, ...] = (
+    "domain", "cluster_signature", "narrative", "member_count",
+    "model_version", "narrative_format_version", "created_at", "used_count",
+)
+
 K2G_ENTITY_ALIAS_COLUMNS: tuple[str, ...] = (
     "entity_id_a", "entity_id_b", "relation", "confidence",
     "asserted_by", "asserted_at",
@@ -284,9 +320,9 @@ TIER1_TABLES: dict[str, tuple[str, ...]] = {
 }
 
 
-# Mapping for Tier-2 export/import.  Plan-related edges (event_belongs_to_context,
-# plan_from, plan_next, realized_as) are intentionally deferred to a follow-up
-# BP — see BP-74 §10.
+# Mapping for Tier-2 export/import. event_belongs_to_context / plan_from /
+# realized_as now ride DERIVED_TABLES (below); plan_next is omitted as it has no
+# domain anchor (from_id/to_id are CG/PLN/DIR ids, not events/entities).
 TIER2_TABLES: dict[str, tuple[str, ...]] = {
     "context_groups": CONTEXT_GROUPS_COLUMNS,
     "event_template_groups": EVENT_TEMPLATE_GROUPS_COLUMNS,
@@ -301,6 +337,24 @@ TIER2_TABLES: dict[str, tuple[str, ...]] = {
 SEGMENT_TABLES: dict[str, tuple[str, ...]] = {
     "k2g_raw_document": K2G_RAW_DOCUMENT_COLUMNS,
     "k2g_segment_blob": K2G_SEGMENT_BLOB_COLUMNS,
+}
+
+
+# Derived tables — jaccard graph + leiden community assignments + their
+# train_run parent + embedding meta + narrative cache. Gated by
+# options.include_derived so a migration carries the computed graph instead of
+# forcing a post-import recompute. plan_from / realized_as ride options
+# .include_plan (plan edges). plan_next is omitted — it has no domain anchor.
+DERIVED_TABLES: dict[str, tuple[str, ...]] = {
+    "train_run": TRAIN_RUN_COLUMNS,
+    "entity_embedding_meta": ENTITY_EMBEDDING_META_COLUMNS,
+    "event_jaccard_connected": EVENT_JACCARD_CONNECTED_COLUMNS,
+    "event_belongs_to_context": EVENT_BELONGS_TO_CONTEXT_COLUMNS,
+    "entity_community_assignment": ENTITY_COMMUNITY_ASSIGNMENT_COLUMNS,
+    "event_community_assignment": EVENT_COMMUNITY_ASSIGNMENT_COLUMNS,
+    "cluster_narrative_cache": CLUSTER_NARRATIVE_CACHE_COLUMNS,
+    "plan_from": PLAN_FROM_COLUMNS,
+    "realized_as": REALIZED_AS_COLUMNS,
 }
 
 
@@ -335,4 +389,16 @@ TABLE_PKS: dict[str, tuple[str, ...]] = {
     "k2g_segment_blob": ("id",),
     # Content store (BP-86)
     "content_store": ("content_id",),
+    # Derived (jaccard / community / training)
+    "train_run": ("id",),
+    "entity_embedding_meta": ("entity_id",),
+    "event_jaccard_connected": ("a_id", "b_id"),
+    "event_belongs_to_context": ("event_id", "target_id", "target_kind"),
+    "entity_community_assignment": ("run_id", "entity_id"),
+    "event_community_assignment": ("run_id", "event_id"),
+    "cluster_narrative_cache": (
+        "domain", "cluster_signature", "model_version", "narrative_format_version",
+    ),
+    "plan_from": ("event_id", "target_id", "target_kind"),
+    "realized_as": ("from_id", "from_kind", "event_id"),
 }

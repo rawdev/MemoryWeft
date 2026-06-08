@@ -29,6 +29,7 @@ from k2g.portable.manifest import (
 )
 from k2g.portable.schema import (
     CONTENT_TABLES,
+    DERIVED_TABLES,
     SEGMENT_TABLES,
     TIER1_TABLES,
     TIER2_TABLES,
@@ -126,7 +127,48 @@ _PLAN_EXPORTS: tuple[tuple[str, str], ...] = (
 
 
 def _all_table_cols() -> dict[str, tuple[str, ...]]:
-    return {**TIER1_TABLES, **TIER2_TABLES, **SEGMENT_TABLES, **CONTENT_TABLES}
+    return {
+        **TIER1_TABLES, **TIER2_TABLES, **DERIVED_TABLES,
+        **SEGMENT_TABLES, **CONTENT_TABLES,
+    }
+
+
+# Derived exports — (table, member, alias|None, FROM/WHERE template, n_params).
+# alias=None → direct ``WHERE domain`` (columns unprefixed); otherwise the
+# columns are alias-qualified and filtered through a JOIN to entities/events so
+# only in-domain rows are carried. ``{p}`` = the backend placeholder.
+_DERIVED_EXPORTS: tuple[tuple[str, str, str | None, str, int], ...] = (
+    ("train_run", "db/derived/train_run.jsonl", None,
+     "FROM train_run WHERE domain = {p}", 1),
+    ("entity_embedding_meta", "db/derived/entity_embedding_meta.jsonl", "m",
+     "FROM entity_embedding_meta m JOIN entities e ON e.id = m.entity_id "
+     "WHERE e.domain = {p}", 1),
+    ("event_jaccard_connected", "db/edges/event_jaccard_connected.jsonl", "ej",
+     "FROM event_jaccard_connected ej "
+     "JOIN events ea ON ea.id = ej.a_id JOIN events eb ON eb.id = ej.b_id "
+     "WHERE ea.domain = {p} AND eb.domain = {p}", 2),
+    ("event_belongs_to_context", "db/edges/event_belongs_to_context.jsonl", "x",
+     "FROM event_belongs_to_context x JOIN events e ON e.id = x.event_id "
+     "WHERE e.domain = {p}", 1),
+    ("entity_community_assignment",
+     "db/derived/entity_community_assignment.jsonl", "a",
+     "FROM entity_community_assignment a JOIN entities e ON e.id = a.entity_id "
+     "WHERE e.domain = {p}", 1),
+    ("event_community_assignment",
+     "db/derived/event_community_assignment.jsonl", "a",
+     "FROM event_community_assignment a JOIN events e ON e.id = a.event_id "
+     "WHERE e.domain = {p}", 1),
+    ("cluster_narrative_cache", "db/derived/cluster_narrative_cache.jsonl", None,
+     "FROM cluster_narrative_cache WHERE domain = {p}", 1),
+)
+
+# Plan edges — ride options.include_plan (same JOIN-to-events filter).
+_PLAN_EDGE_EXPORTS: tuple[tuple[str, str, str | None, str, int], ...] = (
+    ("plan_from", "db/plan/plan_from.jsonl", "x",
+     "FROM plan_from x JOIN events e ON e.id = x.event_id WHERE e.domain = {p}", 1),
+    ("realized_as", "db/plan/realized_as.jsonl", "x",
+     "FROM realized_as x JOIN events e ON e.id = x.event_id WHERE e.domain = {p}", 1),
+)
 
 
 def _fetch_all(
@@ -268,8 +310,18 @@ class DomainExporter:
                         json_dumps=dumps,
                     )
 
+            # --- Derived: jaccard / community / training --------------
+            if opts.include_derived:
+                self._export_derived(
+                    writer, _DERIVED_EXPORTS, domain, row_counts,
+                )
+
             # --- Plan (gated by options.include_plan) -----------------
             if opts.include_plan:
+                # plan node tables (direct domain) + plan edges (events JOIN)
+                self._export_derived(
+                    writer, _PLAN_EDGE_EXPORTS, domain, row_counts,
+                )
                 for table, member in _PLAN_EXPORTS:
                     cols = all_cols[table]
                     sql = (
@@ -364,6 +416,46 @@ class DomainExporter:
         return manifest
 
     # --- helpers ------------------------------------------------------
+
+    def _safe_fetch(
+        self, sql: str, params: tuple, cols: tuple[str, ...],
+    ) -> list[dict[str, Any]]:
+        """``_fetch_all`` that tolerates a missing table/column (older schema).
+
+        Returns [] and rolls back the aborted statement (Postgres) instead of
+        failing the whole export when a derived table isn't present yet.
+        """
+        try:
+            return _fetch_all(self._conn, sql, params, cols)
+        except Exception as exc:  # noqa: BLE001
+            try:
+                self._conn.rollback()
+            except Exception:
+                pass
+            logger.debug("derived export skipped (%s): %s", sql[:60], exc)
+            return []
+
+    def _export_derived(
+        self,
+        writer: Any,
+        specs: tuple[tuple[str, str, str | None, str, int], ...],
+        domain: str,
+        row_counts: dict[str, int],
+    ) -> None:
+        """Export a set of derived/edge tables, each tolerant of absence."""
+        all_cols = _all_table_cols()
+        for table, member, alias, from_where, nparams in specs:
+            cols = all_cols[table]
+            sel = _prefix_cols(alias, cols) if alias else ", ".join(cols)
+            sql = f"SELECT {sel} {from_where.format(p=self._p)}"  # noqa: S608
+            rows = self._safe_fetch(sql, (domain,) * nparams, cols)
+            row_counts[f"derived.{table}"] = len(rows)
+            writer.add_jsonl(
+                member,
+                rows=iter(rows),
+                header={"table": table, "columns": list(cols)},
+                json_dumps=dumps,
+            )
 
     def _fetch_vectors(self, table: str, domain: str) -> list[dict[str, Any]]:
         """Read ``(id, embedding)`` for a domain, embedding decoded to floats.

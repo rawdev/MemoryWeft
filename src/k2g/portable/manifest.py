@@ -38,6 +38,10 @@ class ArchiveOptions(BaseModel):
     include_segments: bool = True
     include_vectors: bool = True
     include_plan: bool = True
+    # Derived graph: jaccard edges + leiden community assignments (+ train_run,
+    # embedding meta, narrative cache). On by default so a migration carries the
+    # computed graph and needs no post-import recompute.
+    include_derived: bool = True
     include_audit: bool = False
     include_content: bool = True  # BP-86 — content_store.db raw text bodies
 

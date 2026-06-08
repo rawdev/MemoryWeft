@@ -29,6 +29,7 @@ from k2g.portable.archive_io import ArchiveReader, DirReader
 from k2g.portable.manifest import ArchiveManifest
 from k2g.portable.schema import (
     CONTENT_TABLES,
+    DERIVED_TABLES,
     SEGMENT_TABLES,
     TABLE_PKS,
     TIER1_TABLES,
@@ -119,6 +120,19 @@ IMPORT_ORDER: tuple[tuple[str, str, bool], ...] = (
     # Tier-2 references
     ("k2g_entity_alias",        "db/edges/k2g_entity_alias.jsonl", True),
     ("k2g_event_reference",     "db/edges/k2g_event_reference.jsonl", True),
+    # Derived: jaccard + leiden community (+ train_run parent, embedding meta,
+    # narrative cache). Gated upstream by options.include_derived. train_run
+    # MUST precede the *_community_assignment members (run_id FK).
+    ("train_run",                   "db/derived/train_run.jsonl", True),
+    ("entity_embedding_meta",       "db/derived/entity_embedding_meta.jsonl", True),
+    ("event_jaccard_connected",     "db/edges/event_jaccard_connected.jsonl", True),
+    ("event_belongs_to_context",    "db/edges/event_belongs_to_context.jsonl", True),
+    ("entity_community_assignment", "db/derived/entity_community_assignment.jsonl", True),
+    ("event_community_assignment",  "db/derived/event_community_assignment.jsonl", True),
+    ("cluster_narrative_cache",     "db/derived/cluster_narrative_cache.jsonl", True),
+    # Plan edges (gated upstream by options.include_plan)
+    ("plan_from",                   "db/plan/plan_from.jsonl", True),
+    ("realized_as",                 "db/plan/realized_as.jsonl", True),
     # Segments (gated upstream by options.include_segments)
     ("k2g_raw_document",        "db/k2g_raw_document.jsonl", True),
     ("k2g_segment_blob",        "db/k2g_segment_blob.jsonl", True),
@@ -130,7 +144,10 @@ TIER1_ORDER: tuple[str, ...] = tuple(t for t, _, opt in IMPORT_ORDER if not opt)
 
 
 def _all_cols() -> dict[str, tuple[str, ...]]:
-    return {**TIER1_TABLES, **TIER2_TABLES, **SEGMENT_TABLES, **CONTENT_TABLES}
+    return {
+        **TIER1_TABLES, **TIER2_TABLES, **DERIVED_TABLES,
+        **SEGMENT_TABLES, **CONTENT_TABLES,
+    }
 
 
 def _insert_sql(
