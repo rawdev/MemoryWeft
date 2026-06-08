@@ -138,8 +138,18 @@ def _all_table_cols() -> dict[str, tuple[str, ...]]:
 # columns are alias-qualified and filtered through a JOIN to entities/events so
 # only in-domain rows are carried. ``{p}`` = the backend placeholder.
 _DERIVED_EXPORTS: tuple[tuple[str, str, str | None, str, int], ...] = (
+    # train_run = domain-matching runs ∪ runs referenced by the domain's
+    # community assignments. The assignments are filtered by entity/event
+    # domain, so a run that produced them but carries a different / NULL
+    # train_run.domain would otherwise be left out — breaking the
+    # *_community_assignment.run_id FK on import.
     ("train_run", "db/derived/train_run.jsonl", None,
-     "FROM train_run WHERE domain = {p}", 1),
+     "FROM train_run WHERE domain = {p} OR id IN ("
+     "SELECT run_id FROM entity_community_assignment a "
+     "JOIN entities e ON e.id = a.entity_id WHERE e.domain = {p} "
+     "UNION "
+     "SELECT run_id FROM event_community_assignment a "
+     "JOIN events e ON e.id = a.event_id WHERE e.domain = {p})", 3),
     ("entity_embedding_meta", "db/derived/entity_embedding_meta.jsonl", "m",
      "FROM entity_embedding_meta m JOIN entities e ON e.id = m.entity_id "
      "WHERE e.domain = {p}", 1),
