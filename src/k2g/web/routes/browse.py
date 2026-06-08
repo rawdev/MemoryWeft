@@ -744,19 +744,32 @@ def get_domain_summary(
     top_tags = _to_dicts(cur)
 
     # Leiden community count — latest run (kind=leiden_event / leiden_entity).
+    # Tolerant of a missing community table: on a DB where communities were
+    # never computed (or whose schema predates these tables) the table may not
+    # exist — that must yield "no communities" (None), not a 500 that takes the
+    # whole summary down. The failed statement aborts the Postgres transaction,
+    # so roll back before the summary's remaining queries run.
     def _community_count(kind: str, table: str) -> int | None:
-        cur.execute(
-            f"""
-            SELECT COUNT(DISTINCT a.community_id) AS n
-              FROM {table} a
-             WHERE a.run_id = (
-                 SELECT id FROM train_run
-                  WHERE kind = {ph} AND domain = {ph}
-                  ORDER BY COALESCE(finished_at, started_at) DESC
-                  LIMIT 1)
-            """,
-            (kind, domain),
-        )
+        try:
+            cur.execute(
+                f"""
+                SELECT COUNT(DISTINCT a.community_id) AS n
+                  FROM {table} a
+                 WHERE a.run_id = (
+                     SELECT id FROM train_run
+                      WHERE kind = {ph} AND domain = {ph}
+                      ORDER BY COALESCE(finished_at, started_at) DESC
+                      LIMIT 1)
+                """,
+                (kind, domain),
+            )
+        except Exception as exc:  # noqa: BLE001 — missing table / aborted txn
+            logger.debug("community count skipped for %s: %s", table, exc)
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            return None
         rows = _to_dicts(cur)
         if not rows:
             return None
