@@ -363,6 +363,7 @@
   "common.nonJson": "서버가 JSON 이 아닌 응답을 반환했습니다 (HTTP {status}): {snippet}…",
   "err.embedding_fingerprint_mismatch": "임베딩 설정이 이 데이터베이스와 맞지 않습니다. DB를 만들 때 쓴 임베딩 모델·차원으로 설정하거나, 새 데이터 폴더를 지정하세요.",
   "err.embedding_not_configured": "임베딩 제공자 설정이 비어 있습니다 (API 키 또는 모델 경로 누락). 설정을 채우거나, 외부 자원이 필요 없는 제공자로 바꾸세요.",
+  "err.postgres_driver_missing": "이 프로젝트는 PostgreSQL 백엔드를 쓰는데 psycopg2 드라이버가 설치되어 있지 않습니다. PostgreSQL 지원을 설치하거나(pip install 'mweft[postgres]') SQLite 프로젝트를 사용하세요.",
   "err.store_init_failed": "스토어 초기화에 실패했습니다. 서버 로그를 확인하세요.",
   "appbar.projectPrefix": "프로젝트 보기 :",
   "appbar.projectUnset": "프로젝트 미설정",

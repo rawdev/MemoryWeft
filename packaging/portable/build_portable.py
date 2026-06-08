@@ -133,7 +133,7 @@ def main() -> None:
     ap.add_argument("--version", required=True)
     ap.add_argument("--mode", choices=["online", "offline"], default="online")
     ap.add_argument("--model-dir", default=None, help="ONNX model directory to bundle")
-    ap.add_argument("--pkg", default="mweft[embed-onnx,manager]", help="install/download package spec")
+    ap.add_argument("--pkg", default="mweft[embed-onnx,manager,postgres]", help="install/download package spec")
     ap.add_argument("--vc-runtime-dir", default=None,
                     help="win-x64: dir holding the MSVC runtime DLLs to bundle "
                          "(default: the build host's C:/Windows/System32)")

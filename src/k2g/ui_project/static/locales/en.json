@@ -363,6 +363,7 @@
   "common.nonJson": "Server returned a non-JSON response (HTTP {status}): {snippet}…",
   "err.embedding_fingerprint_mismatch": "The embedding configuration does not match this database. Set the embedding model/dimension it was created with, or point this project at a fresh data directory.",
   "err.embedding_not_configured": "The embedding provider is missing a required setting (API key or model path). Configure it, or switch to a provider that needs no external resource.",
+  "err.postgres_driver_missing": "This project uses a PostgreSQL backend but the psycopg2 driver is not installed. Install PostgreSQL support (pip install 'mweft[postgres]') or use a SQLite project.",
   "err.store_init_failed": "Store initialization failed. Check the server log for details.",
   "appbar.projectPrefix": "Viewing project:",
   "appbar.projectUnset": "No project configured",

@@ -8,8 +8,8 @@ setlocal enabledelayedexpansion
 chcp 65001 >nul
 
 set "HERE=%~dp0"
-REM Package: mweft[embed-onnx,manager]. Entry = the native Manager desktop app (mweft-app).
-set "PKG=mweft[embed-onnx,manager]"
+REM Package: mweft[embed-onnx,manager,postgres]. Entry = the native Manager desktop app (mweft-app).
+set "PKG=mweft[embed-onnx,manager,postgres]"
 set "MOD=k2g.desktop"
 
 set "UV=%HERE%bin\uv.exe"

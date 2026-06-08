@@ -61,11 +61,47 @@ def _classify_init_error(exc: Exception) -> StoreInitError:
                 "EMBEDDING_PROVIDER to one that needs no external resource."
             ),
         )
+    if isinstance(exc, ModuleNotFoundError) and "psycopg2" in msg:
+        return StoreInitError(
+            "postgres_driver_missing",
+            msg,
+            hint=(
+                "This project uses a PostgreSQL backend but the psycopg2 driver "
+                "is not installed. Install PostgreSQL support "
+                "(pip install 'mweft[postgres]'), or use a SQLite project. The "
+                "portable bundle ships it from v0.1.11 onward."
+            ),
+        )
     return StoreInitError(
         "store_init_failed",
         msg,
         hint="Store initialization failed. Check the server log for details.",
     )
+
+
+def register_store_init_handler(app: Any) -> None:
+    """Install the StoreInitError → HTTP 503 handler on a FastAPI app.
+
+    Both entry points must register this or a store-init failure surfaces as a
+    bare 500 on that app: the standalone web app (``k2g.web.app``) AND the
+    per-project / desktop app (``k2g.ui_project.cli._build_app``, which the
+    desktop ASGI bridge runs). ``detail`` is a string so the existing
+    ``_fetchJson`` error display surfaces it directly.
+    """
+    from fastapi.responses import JSONResponse
+
+    async def _handler(_request: Any, exc: StoreInitError) -> JSONResponse:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": exc.message,
+                "code": exc.code,
+                "hint": exc.hint,
+                "error": "store_init_failed",
+            },
+        )
+
+    app.add_exception_handler(StoreInitError, _handler)
 
 
 def sanitize(obj: Any) -> Any:  # noqa: ANN401

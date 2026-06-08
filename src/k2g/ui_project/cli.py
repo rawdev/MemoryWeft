@@ -410,6 +410,11 @@ def _build_app(project_dir: Path, *, hub_info: HubInfo | None = None,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Store-init failures → actionable 503 instead of a bare 500. This app is
+    # what the desktop ASGI bridge runs, so without it a Postgres project with
+    # no psycopg2 (or an embedding fingerprint mismatch) returns an opaque 500.
+    from k2g.web.deps import register_store_init_handler
+    register_store_init_handler(app)
     routers = [
         search.router, browse.router, event.router, generate.router,
         tag.router, control.router, persona.router, train.router,

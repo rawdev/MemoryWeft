@@ -8,8 +8,8 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Package: mweft[embed-onnx,manager]. Entry = the native Manager desktop app (mweft-app).
-PKG="mweft[embed-onnx,manager]"
+# Package: mweft[embed-onnx,manager,postgres]. Entry = the native Manager desktop app (mweft-app).
+PKG="mweft[embed-onnx,manager,postgres]"
 MOD="k2g.desktop"
 
 UV="$HERE/bin/uv"
