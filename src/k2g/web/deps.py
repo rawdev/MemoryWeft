@@ -225,6 +225,19 @@ def init_stores(settings: Settings) -> dict[str, Any]:
         except Exception as exc:  # noqa: BLE001
             logger.debug("graph.%s skip/fail: %s", method_name, exc)
 
+    # Ensure the active project's save-domain exists in the registry so the
+    # Manager's domain picker is never empty on a brand-new DB — a first-run
+    # install shows "default" instead of "no domains". Idempotent
+    # (INSERT OR IGNORE / ON CONFLICT) and best-effort: a read-only DB just
+    # skips it.
+    try:
+        default_domain = (settings.user_memory_save_domain or "default").strip()
+        register = getattr(db.graph, "register_domain", None)
+        if default_domain and register is not None:
+            register(default_domain)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("default-domain register skipped: %s", exc)
+
     # Embedding-client init is NON-FATAL. Semantic search and ingestion need it,
     # but browse / domain summary / tags / community are pure graph/SQL and must
     # keep working when embeddings can't load — e.g. a portable Windows build on
