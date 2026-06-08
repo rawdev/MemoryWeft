@@ -40,6 +40,20 @@ from k2g.portable.schema import (
 logger = logging.getLogger(__name__)
 
 
+def _row_first(row: Any) -> Any:  # noqa: ANN401
+    """First column value of a DB-API row, dict-cursor or tuple-cursor alike.
+
+    The Postgres graph store's connection uses a dict cursor (RealDictRow), so a
+    bare ``row[0]`` raises ``KeyError: 0``; SQLite rows index by position. This
+    normalizes both.
+    """
+    if row is None:
+        return None
+    if isinstance(row, dict):  # psycopg2 RealDictRow is a dict subclass
+        return next(iter(row.values()), None)
+    return row[0]
+
+
 class SchemaVersionMismatch(Exception):
     """The archive's `schema_version` is incompatible with this importer."""
 
@@ -413,7 +427,7 @@ class DomainImporter:
                     f"SELECT DISTINCT domain FROM {table} "  # noqa: S608
                     f"WHERE domain IS NOT NULL"
                 )
-                domains.update(row[0] for row in cur.fetchall())
+                domains.update(_row_first(row) for row in cur.fetchall())
             except Exception:
                 try:
                     conn.rollback()
@@ -479,7 +493,7 @@ class DomainImporter:
             cur = conn.cursor()
             cur.execute(f"SELECT COUNT(*) FROM {table}")  # noqa: S608 — fixed table list
             row = cur.fetchone()
-            return int(row[0]) if row else 0
+            return int(_row_first(row)) if row else 0
         except Exception as exc:
             # A missing table (fresh DB) is expected → 0. Anything else is worth
             # a line so a silent under-count can't hide again.
@@ -521,7 +535,7 @@ class DomainImporter:
                 "WHERE table_schema = 'public' AND table_name = ANY(%s)",
                 (list(tables),),
             )
-            present = {r[0] for r in cur.fetchall()}
+            present = {_row_first(r) for r in cur.fetchall()}
         finally:
             try:
                 cur.close()
