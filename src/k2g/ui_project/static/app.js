@@ -3630,7 +3630,11 @@ async function showProjectSetupPanel(initialProjectDir, slug, targetEl) {
   const pgDsn = initialized && cfg.backend.kind === 'postgres' ? cfg.backend.dsn : '';
   // Embedding (provider / model / dim). dim "" → resolve from model server-side.
   const emb = (initialized && cfg.embedding) ? cfg.embedding : {};
-  const embProvider = emb.provider || 'local';
+  // Default to the DEPLOYMENT's provider (portable bundle = onnx), not a
+  // hard-coded 'local'. Saving 'local' on an onnx-only bundle makes the spawned
+  // MCP crash ("sentence-transformers required"). The field is read-only, so
+  // whatever shows here is what gets persisted.
+  const embProvider = emb.provider || (cfg && cfg.deployment_provider) || 'local';
   const embModel = emb.model || 'BAAI/bge-m3';
   const embDim = (emb.dim != null && emb.dim !== '') ? String(emb.dim) : '';
   // Search targets — editable list of domains (was round-tripped, no editor).

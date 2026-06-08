@@ -147,7 +147,7 @@ class OpenAIEmbeddingClient:
 class LocalEmbeddingClient:
     """Local embedding client using sentence-transformers.
 
-    Optional dependency: pip install k2g[local-embed]
+    Optional dependency: pip install 'mweft[embed-local]'
     """
 
     def __init__(self, model_name: str, embedding_dim: int) -> None:
@@ -168,7 +168,8 @@ class LocalEmbeddingClient:
                 from sentence_transformers import SentenceTransformer
             except ImportError as e:
                 raise ImportError(
-                    "sentence-transformers required: pip install k2g[local-embed]"
+                    "sentence-transformers required: pip install 'mweft[embed-local]' "
+                    "(or use the onnx backend: EMBEDDING_PROVIDER=onnx)"
                 ) from e
             logger.info("Loading local embedding model: %s", self._model_name)
             self._model = SentenceTransformer(self._model_name)

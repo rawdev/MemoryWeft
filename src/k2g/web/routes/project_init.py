@@ -125,6 +125,11 @@ def get_project_config(project_dir: str = "", slug: str = "") -> dict[str, Any]:
             "name": entry.name if entry else None,
             "path": str(registry_path()),
             "ai_clients": list(entry.ai_clients or []) if entry else [],
+            # The deployment's effective embedding provider (portable bundle sets
+            # onnx). The setup form defaults to THIS, not a hard-coded "local" —
+            # saving "local" on an onnx-only bundle makes the spawned MCP crash
+            # ("sentence-transformers required").
+            "deployment_provider": os.environ.get("EMBEDDING_PROVIDER") or "local",
         })
     is_pg = (entry.backend == "postgres") or bool(entry.postgres_dsn)
     emb = entry.embedding or {}
@@ -134,6 +139,7 @@ def get_project_config(project_dir: str = "", slug: str = "") -> dict[str, Any]:
     model = str(emb.get("model") or os.environ.get("EMBEDDING_MODEL") or "BAAI/bge-m3")
     return sanitize({
         "initialized": True,
+        "deployment_provider": os.environ.get("EMBEDDING_PROVIDER") or "local",
         "project_dir": entry.project_dir,
         # Effective local anchor (object storage + logs). For Postgres the entry
         # may carry none, so suggest a per-project default the onboarding pre-fills.

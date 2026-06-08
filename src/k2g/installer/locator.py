@@ -41,6 +41,43 @@ def _appdata() -> Path | None:
     return None
 
 
+def _local_appdata() -> Path | None:
+    """Windows ``%LOCALAPPDATA%`` — typically ``C:\\Users\\<u>\\AppData\\Local``."""
+    local = os.environ.get("LOCALAPPDATA", "")
+    if local:
+        return Path(local)
+    return None
+
+
+def _msix_claude_config() -> Path | None:
+    """Config path for a Microsoft Store / MSIX Claude Desktop, or None.
+
+    MSIX virtualises a packaged app's ``%APPDATA%``: when Claude (Store build,
+    family ``Claude_*``) reads ``%APPDATA%\\Claude\\claude_desktop_config.json``
+    it actually reads a package-local copy under
+    ``%LOCALAPPDATA%\\Packages\\Claude_*\\LocalCache\\Roaming\\Claude\\``.
+    The Manager (an unpackaged process) writes to the *real* ``%APPDATA%``, so
+    edits never reach the app. Target the package-local path instead when a
+    Claude MSIX package is present (and has run, i.e. its Roaming\\Claude dir
+    exists). Returns None for a direct-download (non-Store) install, which uses
+    the plain ``%APPDATA%`` path. Never raises.
+    """
+    local = _local_appdata()
+    if local is None:
+        return None
+    packages = local / "Packages"
+    if not packages.is_dir():
+        return None
+    try:
+        for pkg in sorted(packages.glob("Claude_*")):
+            cfg = pkg / "LocalCache" / "Roaming" / "Claude" / "claude_desktop_config.json"
+            if cfg.parent.is_dir():
+                return cfg
+    except OSError:
+        return None
+    return None
+
+
 def config_path(
     client_slug: str,
     *,
@@ -72,6 +109,10 @@ def config_path(
 
     if client_slug == "claude_desktop":
         if plat == "windows":
+            # Store/MSIX Claude reads a package-local copy, not %APPDATA%\Claude.
+            msix = _msix_claude_config()
+            if msix is not None:
+                return msix
             ad = _appdata()
             if ad is None:
                 return None
