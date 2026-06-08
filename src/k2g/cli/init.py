@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -244,7 +245,13 @@ def _finish(
         slug=e.slug, group=group, domain=domain,
         search_targets=[{"domain": domain}], save_tags=[],
         backend=backend_kind, postgres_dsn=dsn,
-        embedding={"provider": "local", "model": "BAAI/bge-m3", "dim": None},
+        # Embedding is deployment-determined (portable bundle = onnx), not a
+        # fixed "local" — else an onnx-only install records local and crashes.
+        embedding={
+            "provider": os.environ.get("EMBEDDING_PROVIDER") or "local",
+            "model": os.environ.get("EMBEDDING_MODEL") or "BAAI/bge-m3",
+            "dim": None,
+        },
         project_dir=proj_dir, db_dir=db_dir,
     )
     env = entry_env_dict(get_project(e.slug) or e)

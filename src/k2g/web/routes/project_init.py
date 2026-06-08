@@ -261,6 +261,15 @@ def init_project(
     if not search_targets:
         search_targets = [{"domain": body.domain}]
 
+    # Embedding is DEPLOYMENT-determined, not a user choice — the setup form's
+    # provider field is read-only. Derive it from the running env (the portable
+    # bundle sets EMBEDDING_PROVIDER=onnx) so a fresh registration records the
+    # real provider, not the request's "local" default. Persisting "local" on an
+    # onnx-only bundle makes the spawned MCP crash ("sentence-transformers
+    # required"). Env wins; the request value is the fallback (dev/torch install).
+    emb_provider = os.environ.get("EMBEDDING_PROVIDER") or body.embedding.provider
+    emb_model = os.environ.get("EMBEDDING_MODEL") or body.embedding.model
+
     try:
         update_project(
             slug=slug,
@@ -271,8 +280,8 @@ def init_project(
             save_tags=list(body.save_tags or []),
             backend=backend_kind, postgres_dsn=postgres_dsn,
             embedding={
-                "provider": body.embedding.provider,
-                "model": body.embedding.model,
+                "provider": emb_provider,
+                "model": emb_model,
                 "dim": body.embedding.dim,
             },
         )
