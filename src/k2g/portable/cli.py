@@ -109,10 +109,10 @@ def _build_export_parser() -> argparse.ArgumentParser:
         help="Skip the content store (raw text bodies / inline content).",
     )
     p.add_argument(
-        "--vectors",
-        choices=["skip", "recompute"],
-        default="skip",
-        help="Vector handling. v1: only 'skip' is implemented.",
+        "--no-vectors",
+        action="store_true",
+        help="Skip entity/event embeddings. By default vectors travel with the "
+             "archive so a migration (e.g. SQLite → Postgres) is lossless.",
     )
     p.add_argument(
         "--project-dir",
@@ -137,7 +137,7 @@ def export_main(argv: list[str] | None = None) -> int:
     opts = ArchiveOptions(
         include_segments=not args.no_segments,
         include_plan=not args.no_plan,
-        include_vectors=(args.vectors != "skip"),
+        include_vectors=not args.no_vectors,
         include_content=not args.no_content,
     )
 

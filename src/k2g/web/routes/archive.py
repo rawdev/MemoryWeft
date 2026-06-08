@@ -44,7 +44,10 @@ router = APIRouter(tags=["archive"])
 class ExportOptionsIn(BaseModel):
     include_segments: bool = True
     include_plan: bool = True
-    include_vectors: bool = False
+    # Default ON: embeddings must travel with the archive for a lossless graph
+    # migration (e.g. SQLite → Postgres). The UI omits this field, so the
+    # default is what the Manager's Export button uses.
+    include_vectors: bool = True
     include_audit: bool = False
 
 
