@@ -229,9 +229,24 @@ class OnnxEmbeddingClient:
             import onnxruntime as ort
             from tokenizers import Tokenizer
         except ImportError as e:
+            detail = str(e)
+            # A bundled onnxruntime that fails its *native* import (rather than
+            # being absent) is almost always a missing MSVC runtime on Windows —
+            # the wheel does not carry vcruntime140/msvcp140; it relies on the
+            # system Visual C++ Redistributable. Tell the user that, not a bogus
+            # "pip install" (the package is already there in a portable build).
+            if "DLL load failed" in detail or "_pybind11_state" in detail:
+                raise ImportError(
+                    "onnxruntime is installed but its native library failed to "
+                    "load. On Windows this means the Microsoft Visual C++ "
+                    "Redistributable (x64) is missing — install it from "
+                    "https://aka.ms/vs/17/release/vc_redist.x64.exe and restart. "
+                    f"(original: {detail})"
+                ) from e
             raise ImportError(
                 "onnxruntime + tokenizers required: "
-                "pip install k2g[embed-onnx]"
+                "pip install 'mweft[embed-onnx]' "
+                f"(original: {detail})"
             ) from e
 
         from pathlib import Path

@@ -37,6 +37,14 @@ def vector_search(
     graph = stores["graph"]
     content_store = stores["content"]
 
+    # Semantic search needs the embedding client; it may be unavailable (e.g. a
+    # portable build whose onnxruntime native module can't load). Browse / tags /
+    # summary keep working without it, so report a clear reason here rather than
+    # crashing on a None client.
+    if embedding_client is None:
+        reason = stores.get("embedding_error") or "Embeddings are not available."
+        return {"error": reason, "code": "embedding_unavailable", "results": []}
+
     # 1. Query embedding
     try:
         query_vector = embedding_client.embed(query)

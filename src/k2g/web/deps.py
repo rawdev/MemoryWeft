@@ -225,7 +225,24 @@ def init_stores(settings: Settings) -> dict[str, Any]:
         except Exception as exc:  # noqa: BLE001
             logger.debug("graph.%s skip/fail: %s", method_name, exc)
 
-    embedding_client = _get_embedding_client(settings)
+    # Embedding-client init is NON-FATAL. Semantic search and ingestion need it,
+    # but browse / domain summary / tags / community are pure graph/SQL and must
+    # keep working when embeddings can't load — e.g. a portable Windows build on
+    # a box missing the MSVC runtime, where onnxruntime's native module won't
+    # import. A failure here degrades just those two features instead of 500-ing
+    # the whole Manager. Genuine graph-open failures (embedding fingerprint
+    # mismatch) remain fatal above in DbStore.from_settings and surface as 503.
+    embedding_client = None
+    embedding_error = ""
+    try:
+        embedding_client = _get_embedding_client(settings)
+    except Exception as exc:  # noqa: BLE001
+        embedding_error = str(exc)
+        logger.warning(
+            "Embedding client unavailable — semantic search and ingestion are "
+            "disabled; browse / summary / tags / community still work. %s",
+            embedding_error,
+        )
 
     return {
         "graph": db.graph,
@@ -233,6 +250,7 @@ def init_stores(settings: Settings) -> dict[str, Any]:
         "content": db.content,
         "objects": db.object,
         "embedding": embedding_client,
+        "embedding_error": embedding_error,
         "_db": db,  # used when calling close()
     }
 
