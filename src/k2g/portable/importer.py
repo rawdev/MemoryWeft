@@ -372,6 +372,7 @@ class DomainImporter:
         )
         self._restore_graph(reader, results, wipe=True)
         self._restore_content_store(reader, results, wipe=True)
+        self._restore_vectors(reader, results)
         self._reconcile_domain_registry()
         logger.info(
             "Restored domain=%s results=%s", manifest.source.domain, results,
@@ -612,6 +613,109 @@ class DomainImporter:
         except Exception:
             cs_conn.rollback()
             raise
+
+    def _restore_vectors(
+        self,
+        reader: ArchiveReader | DirReader,
+        results: dict[str, dict[str, int]],
+    ) -> None:
+        """Restore entity/event embeddings from the ``db/vectors/*`` members.
+
+        Embeddings ride a side member (portable ``list[float]``) rather than the
+        generic column path, because the storage form is backend-specific:
+        a sqlite-vec BLOB under SQLite, a pgvector ``vector`` under Postgres.
+        Entities/events were already inserted by the graph restore, so this is a
+        bulk UPDATE keyed by id. Absent members (older archives /
+        ``include_vectors=False``) are simply skipped — vectors stay NULL.
+        """
+        for table, member in (
+            ("entities", "db/vectors/entities.jsonl"),
+            ("events", "db/vectors/events.jsonl"),
+        ):
+            if not reader.has_member(member):
+                continue
+            try:
+                n = self._bulk_update_vectors(table, reader, member)
+                results.setdefault(table, _empty_counts())
+                results[table]["vectors"] = n
+                logger.info("  restored %s embeddings: %d rows", table, n)
+            except Exception:
+                self._conn.rollback()
+                raise
+
+    def _bulk_update_vectors(
+        self,
+        table: str,
+        reader: ArchiveReader | DirReader,
+        member: str,
+        chunk: int = _BULK_CHUNK,
+    ) -> int:
+        """Bulk UPDATE ``{table}.embedding`` from a vectors member.
+
+        SQLite: chunked ``executemany`` with sqlite-vec BLOBs.
+        Postgres: ``execute_values`` + ``UPDATE … FROM (VALUES …)`` with an
+        explicit ``::vector`` cast on the text literal (mirrors
+        PgVectorStore.upsert; needs no pgvector adapter on this connection).
+        """
+        from k2g.portable.vector_codec import (
+            encode_embedding_sqlite,
+            pg_vector_literal,
+        )
+
+        count = 0
+        if self._backend == "sqlite":
+            sql = f"UPDATE {table} SET embedding = ? WHERE id = ?"  # noqa: S608
+            cur = self._conn.cursor()
+            try:
+                batch: list[tuple[Any, ...]] = []
+                for row in reader.iter_jsonl(member):
+                    blob = encode_embedding_sqlite(row.get("embedding"))
+                    if blob is None:
+                        continue
+                    batch.append((blob, row.get("id")))
+                    if len(batch) >= chunk:
+                        cur.executemany(sql, batch)
+                        count += len(batch)
+                        batch = []
+                if batch:
+                    cur.executemany(sql, batch)
+                    count += len(batch)
+            finally:
+                try:
+                    cur.close()
+                except Exception:
+                    pass
+            return count
+
+        # Postgres
+        from psycopg2.extras import execute_values
+
+        sql = (
+            f"UPDATE {table} AS t SET embedding = d.emb::vector "  # noqa: S608
+            f"FROM (VALUES %s) AS d(id, emb) WHERE t.id = d.id"
+        )
+        cur = self._conn.cursor()
+        try:
+            page = 500
+            batch = []
+            for row in reader.iter_jsonl(member):
+                lit = pg_vector_literal(row.get("embedding"))
+                if lit is None:
+                    continue
+                batch.append((row.get("id"), lit))
+                if len(batch) >= page:
+                    execute_values(cur, sql, batch, page_size=page)
+                    count += len(batch)
+                    batch = []
+            if batch:
+                execute_values(cur, sql, batch, page_size=page)
+                count += len(batch)
+        finally:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        return count
 
     def _bulk_insert(
         self,

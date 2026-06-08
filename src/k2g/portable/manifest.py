@@ -36,7 +36,7 @@ class ArchiveOptions(BaseModel):
     """Export-time toggles. Mirrors CLI flags."""
 
     include_segments: bool = True
-    include_vectors: bool = False
+    include_vectors: bool = True
     include_plan: bool = True
     include_audit: bool = False
     include_content: bool = True  # BP-86 — content_store.db raw text bodies

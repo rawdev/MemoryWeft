@@ -248,6 +248,26 @@ class DomainExporter:
                     json_dumps=dumps,
                 )
 
+            # --- Vectors (gated by options.include_vectors) -----------
+            # Embeddings live in the backend-specific entities/events.embedding
+            # column (sqlite-vec BLOB / pgvector). Exported as a portable
+            # list[float] in a side member so the generic column path stays
+            # backend-neutral. Lossless graph migration depends on this.
+            if opts.include_vectors:
+                for table, member in (
+                    ("entities", "db/vectors/entities.jsonl"),
+                    ("events", "db/vectors/events.jsonl"),
+                ):
+                    rows = self._fetch_vectors(table, domain)
+                    row_counts[f"vectors.{table}"] = len(rows)
+                    writer.add_jsonl(
+                        member,
+                        rows=iter(rows),
+                        header={"table": f"{table}.embedding",
+                                "columns": ["id", "embedding"]},
+                        json_dumps=dumps,
+                    )
+
             # --- Plan (gated by options.include_plan) -----------------
             if opts.include_plan:
                 for table, member in _PLAN_EXPORTS:
@@ -344,6 +364,42 @@ class DomainExporter:
         return manifest
 
     # --- helpers ------------------------------------------------------
+
+    def _fetch_vectors(self, table: str, domain: str) -> list[dict[str, Any]]:
+        """Read ``(id, embedding)`` for a domain, embedding decoded to floats.
+
+        Only rows that actually carry a vector are emitted (``embedding IS NOT
+        NULL``), so a partially-embedded domain exports just what it has.
+        """
+        from k2g.portable.vector_codec import decode_embedding
+
+        sql = (
+            f"SELECT id, embedding FROM {table} "  # noqa: S608 — table is a fixed literal
+            f"WHERE domain = {self._p} AND embedding IS NOT NULL"
+        )
+        cur = self._conn.cursor()
+        try:
+            cur.execute(sql, (domain,))
+            out: list[dict[str, Any]] = []
+            for rid, emb in cur.fetchall():
+                vec = decode_embedding(emb)
+                if vec is not None:
+                    out.append({"id": rid, "embedding": vec})
+            return out
+        except Exception as exc:  # noqa: BLE001
+            # No embedding column on this schema (older/minimal DB) → nothing to
+            # export. Roll back the aborted statement (Postgres) and move on.
+            try:
+                self._conn.rollback()
+            except Exception:
+                pass
+            logger.debug("vector export skipped for %s: %s", table, exc)
+            return []
+        finally:
+            try:
+                cur.close()
+            except Exception:
+                pass
 
     def suggested_archive_name(self, domain: str) -> str:
         """`<group>_<domain>_<UTC-basic-ISO>.mweft.tar.gz`."""

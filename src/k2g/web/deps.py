@@ -261,16 +261,21 @@ def init_stores(settings: Settings) -> dict[str, Any]:
         except Exception as exc:  # noqa: BLE001
             logger.debug("graph.%s skip/fail: %s", method_name, exc)
 
-    # Ensure the active project's save-domain exists in the registry so the
-    # Manager's domain picker is never empty on a brand-new DB — a first-run
-    # install shows "default" instead of "no domains". Idempotent
-    # (INSERT OR IGNORE / ON CONFLICT) and best-effort: a read-only DB just
-    # skips it.
+    # On a brand-new DB, register the active project's save-domain so the
+    # Manager's domain picker isn't empty on first run (shows "default" instead
+    # of "no domains"). Only when the DB has NO data domains yet: a populated /
+    # migrated DB already exposes its real domains, and registering the
+    # configured save-domain there would create a phantom domain that has no
+    # data (e.g. a 'work'/'default' entry next to migrated 'K2G' data).
+    # Idempotent + best-effort (a read-only DB just skips it).
     try:
-        default_domain = (settings.user_memory_save_domain or "default").strip()
+        list_domains = getattr(db.graph, "list_domains", None)
         register = getattr(db.graph, "register_domain", None)
-        if default_domain and register is not None:
-            register(default_domain)
+        has_data = bool(list_domains()) if callable(list_domains) else True
+        if not has_data and register is not None:
+            default_domain = (settings.user_memory_save_domain or "default").strip()
+            if default_domain:
+                register(default_domain)
     except Exception as exc:  # noqa: BLE001
         logger.debug("default-domain register skipped: %s", exc)
 
