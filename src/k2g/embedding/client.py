@@ -10,6 +10,8 @@ Backends:
 from __future__ import annotations
 
 import logging
+import sys
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
@@ -222,9 +224,54 @@ class OnnxEmbeddingClient:
     tensors, they are used as-is.
     """
 
+    @staticmethod
+    def _register_bundled_dll_dirs(model_path: str) -> None:
+        """Make the bundled MSVC runtime visible to onnxruntime's native module.
+
+        onnxruntime's ``*.pyd`` depends on the Visual C++ runtime
+        (vcruntime140 / msvcp140), which its wheel does NOT carry — on a clean
+        Windows box without the VC++ Redistributable, ``import onnxruntime``
+        fails with a DLL-load error. The portable zip ships the runtime under
+        ``<bundle>/vc_runtime``; adding that directory to the DLL search path
+        *before* the import lets the native module resolve it, so no system
+        install is needed. No-op off Windows / outside the portable bundle.
+        """
+        if not sys.platform.startswith("win"):
+            return
+        import os
+
+        candidates: list[Path] = []
+        env_dir = os.environ.get("MWEFT_VC_RUNTIME_DIR")
+        if env_dir:
+            candidates.append(Path(env_dir))
+        # Fallback: derive <bundle>/vc_runtime from the bundled model path
+        # (<bundle>/models/bge-m3-onnx) when the launcher env var is absent.
+        try:
+            for up in Path(model_path).resolve().parents:
+                candidates.append(up / "vc_runtime")
+        except Exception:  # noqa: BLE001
+            pass
+
+        seen: set[str] = set()
+        for d in candidates:
+            key = str(d).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                if d.is_dir():
+                    os.add_dll_directory(str(d))
+                    logger.debug("Added bundled DLL dir for onnxruntime: %s", d)
+                    return
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Could not add DLL dir %s: %s", d, exc)
+
     def __init__(
         self, model_path: str, embedding_dim: int, max_length: int = 512,
     ) -> None:
+        # Register the bundled MSVC runtime before importing onnxruntime so its
+        # native module loads on a clean Windows box (portable zip case).
+        self._register_bundled_dll_dirs(model_path)
         try:
             import onnxruntime as ort
             from tokenizers import Tokenizer
@@ -248,8 +295,6 @@ class OnnxEmbeddingClient:
                 "pip install 'mweft[embed-onnx]' "
                 f"(original: {detail})"
             ) from e
-
-        from pathlib import Path
 
         p = Path(model_path)
         if p.is_dir():

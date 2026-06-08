@@ -45,6 +45,46 @@ UV_ASSET = {
 }
 UV_BASE = "https://github.com/astral-sh/uv/releases/latest/download"
 
+# MSVC runtime DLLs onnxruntime's native module depends on. The onnxruntime
+# wheel does NOT carry these; on a clean Windows box without the VC++
+# Redistributable, ``import onnxruntime`` fails with a DLL-load error. We ship
+# them next to the app and add the dir to the DLL search path at import time
+# (see OnnxEmbeddingClient._register_bundled_dll_dirs).
+VC_RUNTIME_DLLS = (
+    "vcruntime140.dll",
+    "vcruntime140_1.dll",
+    "msvcp140.dll",
+    "msvcp140_1.dll",
+    "msvcp140_2.dll",
+)
+
+
+def bundle_vc_runtime(dest: Path, source_dir: Path | None) -> None:
+    """Copy the MSVC runtime DLLs into the zip (Windows builds only).
+
+    Source defaults to the build host's System32 (CI Windows runners and dev
+    boxes have the VC++ runtime). Override with ``--vc-runtime-dir``. Missing
+    DLLs are skipped with a warning rather than failing the build — the app
+    still works if the user installs the VC++ Redistributable themselves.
+    """
+    src = source_dir or Path("C:/Windows/System32")
+    dest.mkdir(parents=True, exist_ok=True)
+    copied: list[str] = []
+    for name in VC_RUNTIME_DLLS:
+        f = src / name
+        if f.is_file():
+            shutil.copy2(f, dest / name)
+            copied.append(name)
+    if not copied:
+        print(
+            f"[vc] WARNING: no VC runtime DLLs found in {src} — clean-Windows "
+            f"users may need the VC++ Redistributable. Override with "
+            f"--vc-runtime-dir."
+        )
+    else:
+        print(f"[vc] bundled {len(copied)} VC runtime DLL(s) -> {dest}: "
+              + ", ".join(copied))
+
 
 def fetch_uv(platform: str, bin_dir: Path) -> None:
     asset, _, uv_name = UV_ASSET[platform]
@@ -94,6 +134,9 @@ def main() -> None:
     ap.add_argument("--mode", choices=["online", "offline"], default="online")
     ap.add_argument("--model-dir", default=None, help="ONNX model directory to bundle")
     ap.add_argument("--pkg", default="mweft[embed-onnx,manager]", help="install/download package spec")
+    ap.add_argument("--vc-runtime-dir", default=None,
+                    help="win-x64: dir holding the MSVC runtime DLLs to bundle "
+                         "(default: the build host's C:/Windows/System32)")
     ap.add_argument("--wheels-from", default=None,
                     help="offline: extra --find-links dir (e.g. dist/ with a locally built wheel)")
     ap.add_argument("--out", default="dist", help="zip output directory")
@@ -127,6 +170,14 @@ def main() -> None:
             sys.exit(f"error: {md}/model.onnx missing — run mweft_export_bge_onnx.py first")
         shutil.copytree(md, stage / "models" / "bge-m3-onnx")
         print(f"[model] bundled {md}")
+
+    # 3b) (Windows) bundle the MSVC runtime so onnxruntime's native module loads
+    #     on a clean box without the VC++ Redistributable installed.
+    if args.platform == "win-x64":
+        bundle_vc_runtime(
+            stage / "vc_runtime",
+            Path(args.vc_runtime_dir).resolve() if args.vc_runtime_dir else None,
+        )
 
     # 4) (offline) pre-download wheels — for the current platform
     if args.mode == "offline":

@@ -27,6 +27,9 @@ set "K2G_USE_HUB=auto"
 set "EMBEDDING_PROVIDER=onnx"
 set "EMBEDDING_ONNX_PATH=%HERE%models\bge-m3-onnx"
 set "EMBEDDING_DIM=1024"
+REM Bundled MSVC runtime for onnxruntime's native module — lets it load on a
+REM clean Windows box without the VC++ Redistributable installed.
+set "MWEFT_VC_RUNTIME_DIR=%HERE%vc_runtime"
 REM Lazy init: MCP servers the Manager registers defer heavy init to the first
 REM tool call, so the AI client doesn't hit a startup timeout on first connect.
 set "K2G_MCP_LAZY_INIT=true"
