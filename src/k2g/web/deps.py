@@ -15,6 +15,59 @@ from k2g.core.config import Settings
 logger = logging.getLogger(__name__)
 
 
+class StoreInitError(Exception):
+    """Store/embedding initialization failed in a way the user can fix.
+
+    The whole Manager UI shares one lazy ``_initialize()`` (graph + embedding +
+    schema). Any exception there used to propagate as a bare HTTP 500
+    ("Internal Server Error") on *every* data endpoint (tags / search / domain
+    summary), with nothing telling the user what to fix. This carries a stable
+    ``code`` + an actionable ``hint`` so the web layer can return a 503 the UI
+    renders as a real message instead of a blank error. ``_initialized`` is left
+    False on failure, so the next request retries once the config is corrected.
+    """
+
+    def __init__(self, code: str, message: str, hint: str = "") -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.hint = hint
+
+
+def _classify_init_error(exc: Exception) -> StoreInitError:
+    """Map a store-init exception to a stable code + actionable hint."""
+    from k2g.db_store.embedding_guard import EmbeddingFingerprintMismatch
+
+    if isinstance(exc, EmbeddingFingerprintMismatch):
+        return StoreInitError(
+            "embedding_fingerprint_mismatch",
+            str(exc),
+            hint=(
+                "This database was created with a different embedding "
+                "model/dimension than the one currently configured. Set "
+                "EMBEDDING_MODEL / EMBEDDING_DIM (and EMBEDDING_PROVIDER) to "
+                "match the values it was built with, or point this project at "
+                "a fresh data directory."
+            ),
+        )
+    msg = str(exc)
+    if "OPENAI_API_KEY" in msg or "EMBEDDING_ONNX_PATH" in msg:
+        return StoreInitError(
+            "embedding_not_configured",
+            msg,
+            hint=(
+                "The configured embedding provider is missing a required "
+                "setting (API key or model path). Configure it, or switch "
+                "EMBEDDING_PROVIDER to one that needs no external resource."
+            ),
+        )
+    return StoreInitError(
+        "store_init_failed",
+        msg,
+        hint="Store initialization failed. Check the server log for details.",
+    )
+
+
 def sanitize(obj: Any) -> Any:  # noqa: ANN401
     """Recursively convert Neo4j native types (DateTime etc.) to JSON-serializable types."""
     if obj is None or isinstance(obj, (bool, int, float, str)):
@@ -213,7 +266,16 @@ def _ensure_initialized() -> None:
     with _init_lock:
         if _initialized:
             return
-        _initialize()
+        try:
+            _initialize()
+        except StoreInitError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            # Leave _initialized False so a later request retries after the
+            # user fixes the config; surface an actionable 503 instead of 500.
+            err = _classify_init_error(exc)
+            logger.error("Store init failed [%s]: %s", err.code, err.message)
+            raise err from exc
         _initialized = True
 
 

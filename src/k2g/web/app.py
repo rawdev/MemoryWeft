@@ -40,7 +40,7 @@ class SafeJSONResponse(JSONResponse):
             ensure_ascii=False,
         ).encode("utf-8")
 
-from k2g.web.deps import shutdown, startup
+from k2g.web.deps import StoreInitError, shutdown, startup
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,27 @@ app = FastAPI(
     lifespan=lifespan,
     default_response_class=SafeJSONResponse,
 )
+
+@app.exception_handler(StoreInitError)
+async def _store_init_error_handler(_request: Any, exc: StoreInitError) -> JSONResponse:
+    """Render store-init failures as an actionable 503, not a blank 500.
+
+    Every data dependency funnels through the lazy store build; when it fails
+    (e.g. embedding fingerprint mismatch, missing API key/ONNX path) the UI now
+    receives a readable message + a stable ``code`` it can localize, instead of
+    "Internal Server Error". ``detail`` is a string so existing ``_fetchJson``
+    error display surfaces it directly.
+    """
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": exc.message,
+            "code": exc.code,
+            "hint": exc.hint,
+            "error": "store_init_failed",
+        },
+    )
+
 
 # CORS
 app.add_middleware(

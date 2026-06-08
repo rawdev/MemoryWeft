@@ -2845,6 +2845,15 @@ async function _fetchJson(url, init) {
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch (_) { data = null; }
   if (!r.ok) {
+    // Store-init failures (503) carry a stable `code` + `hint`. Localize the
+    // code when we have a translation; always append the hint so the user
+    // knows what to fix (embedding fingerprint mismatch, missing key, etc.).
+    if (data && data.code && data.error === 'store_init_failed') {
+      const localized = t('err.' + data.code);
+      const head = (localized && localized !== 'err.' + data.code) ? localized : (data.detail || '');
+      const hint = data.hint ? `\n${data.hint}` : '';
+      return { ok: false, status: r.status, data, raw: text, error: `${head}${hint}`.trim() };
+    }
     const msg = (data && (data.detail || data.error)) || text.slice(0, 200) || `HTTP ${r.status}`;
     return { ok: false, status: r.status, data, raw: text, error: msg };
   }

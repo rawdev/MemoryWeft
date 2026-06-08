@@ -557,22 +557,28 @@ class Settings(BaseSettings):
     # Embedding
     # ------------------------------------------------------------------
     embedding_provider: Literal["openai", "local", "dummy", "onnx"] = Field(
-        default="openai",
+        default="local",
         description=(
             "Embedding provider. openai = API, "
             "local = sentence-transformers (torch), "
             "onnx = onnxruntime (no torch, portable deployment), "
-            "dummy = deterministic hash-seeded vectors for debugging."
+            "dummy = deterministic hash-seeded vectors for debugging. "
+            "Default is local/BAAI/bge-m3 (1024) — the same fingerprint that "
+            "DB creation (cli.init / project registry) stamps, so a fresh "
+            "install with no EMBEDDING_* env opens its own DB without tripping "
+            "the embedding fingerprint guard. The portable bundle overrides "
+            "this to onnx via env. Previously defaulted to openai/1536, which "
+            "mismatched bge-m3 DBs and 500'd every data request."
         ),
     )
     embedding_model: str = Field(
-        default="text-embedding-3-small",
-        description="Embedding model name",
+        default="BAAI/bge-m3",
+        description="Embedding model name (default matches DB-creation default).",
     )
     embedding_dim: int = Field(
-        default=1536,
+        default=1024,
         gt=0,
-        description="Embedding vector dimension",
+        description="Embedding vector dimension (1024 = BAAI/bge-m3).",
     )
     embedding_onnx_path: str | None = Field(
         default=None,
