@@ -510,6 +510,25 @@ class DomainImporter:
             )
         return out
 
+    def _existing_pg_tables(self, tables: list[str]) -> list[str]:
+        """Subset of ``tables`` that actually exist in the target's public
+        schema, in the given order. Lets TRUNCATE skip tables a target may not
+        have provisioned without erroring."""
+        cur = self._conn.cursor()
+        try:
+            cur.execute(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND table_name = ANY(%s)",
+                (list(tables),),
+            )
+            present = {r[0] for r in cur.fetchall()}
+        finally:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        return [t for t in tables if t in present]
+
     @staticmethod
     def _exec(conn: Any, sql: str) -> None:
         """Run a side-effecting statement on either DB-API connection.
@@ -551,21 +570,50 @@ class DomainImporter:
                 self._conn.commit()
                 self._exec(self._conn, "PRAGMA foreign_keys = OFF")
             else:
-                # Postgres: defer FK checks where constraints are DEFERRABLE so
-                # a self-referential child/parent pair inside one bulk statement
-                # is fine. No-op (and harmless) for non-deferrable constraints.
+                # Postgres: relax the per-statement timeout for the restore — a
+                # large domain's wipe / bulk load can exceed the server default
+                # (Supabase = 2 min). SET LOCAL auto-resets at COMMIT.
+                try:
+                    self._exec(self._conn, "SET LOCAL statement_timeout = 0")
+                except Exception:
+                    pass
+                # Defer FK checks where constraints are DEFERRABLE so a
+                # self-referential child/parent pair inside one bulk statement is
+                # fine. No-op (and harmless) for non-deferrable constraints.
                 try:
                     self._exec(self._conn, "SET CONSTRAINTS ALL DEFERRED")
                 except Exception:
                     pass
 
             if wipe:
-                for table, _m, _o in reversed(IMPORT_ORDER):
-                    try:
-                        self._exec(self._conn, f"DELETE FROM {table}")  # noqa: S608
-                    except Exception:
-                        # Table may not exist on this target — nothing to wipe.
-                        pass
+                if self._backend == "sqlite":
+                    for table, _m, _o in reversed(IMPORT_ORDER):
+                        try:
+                            self._exec(self._conn, f"DELETE FROM {table}")  # noqa: S608
+                        except Exception:
+                            # Table may not exist on this target — nothing to wipe.
+                            pass
+                else:
+                    # Postgres: TRUNCATE, not row-by-row DELETE. `DELETE FROM
+                    # entities` cascades through the FK graph (entity_connection
+                    # has a_id/b_id → entities), re-scanning it per deleted row —
+                    # on a large domain that blows past statement_timeout and the
+                    # swallowed failure then poisons the whole transaction
+                    # ("current transaction is aborted"). TRUNCATE drops all rows
+                    # in one shot with no per-row cascade. CASCADE additionally
+                    # clears derived tables (community / jaccard / embedding meta)
+                    # that FK-reference entities/events — those are recomputed and
+                    # never part of the archive, so clearing them is correct for a
+                    # clone restore.
+                    existing = self._existing_pg_tables(
+                        [t for t, _, _ in IMPORT_ORDER]
+                    )
+                    if existing:
+                        self._exec(
+                            self._conn,
+                            "TRUNCATE " + ", ".join(existing)
+                            + " RESTART IDENTITY CASCADE",  # noqa: S608 — fixed table names
+                        )
 
             for table, member, optional in IMPORT_ORDER:
                 if optional and not reader.has_member(member):
@@ -628,6 +676,13 @@ class DomainImporter:
         bulk UPDATE keyed by id. Absent members (older archives /
         ``include_vectors=False``) are simply skipped — vectors stay NULL.
         """
+        # Postgres: the per-row vector UPDATEs run after the graph restore
+        # committed, so re-relax the timeout for this transaction too.
+        if self._backend != "sqlite":
+            try:
+                self._exec(self._conn, "SET LOCAL statement_timeout = 0")
+            except Exception:
+                pass
         for table, member in (
             ("entities", "db/vectors/entities.jsonl"),
             ("events", "db/vectors/events.jsonl"),
