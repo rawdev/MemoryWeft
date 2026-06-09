@@ -4305,42 +4305,33 @@ async function _psApplyAllMCP() {
   // Save first so the installer derives the latest env from the registry entry.
   const saved = await _psSaveCore({ silentOnReuse: true });
   if (!saved.ok) { out.innerHTML = `<div style="color:red">${t('ps.saveFailForm')}</div>`; return; }
-  const body = { clients: installed.map(c => c.slug) };
-  if (_PS_SLUG) body.slug = _PS_SLUG;   // pin env to this entry (folder may be shared)
-  if (projDir) body.project_dir = projDir;
-  // Preflight: warn if any client's config already points at a different project
-  // (apply overwrites each one). Best-effort — fall through on error.
-  try {
-    const pf = await fetch('/api/installer/preflight', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-    }).then(r => r.json());
-    const conflicts = (pf.clients || []).filter(x => x.exists && !x.same);
-    if (conflicts.length) {
-      const list = conflicts
-        .map(x => `· ${x.slug} → ${x.pointed_name || t('ps.conflictUnknown')}`).join('\n');
-      if (!confirm(t('ps.confirmOverwriteMcpMany', { count: conflicts.length, list }))) {
-        out.innerHTML = `<div class="muted">${t('common.canceled')}</div>`;
-        return;
-      }
-    }
-  } catch (e) { /* preflight is best-effort — fall through to apply */ }
   out.innerHTML = `<div class="muted"><span class="sx-spinner"></span> ${t('common.loading')}</div>`;
-  try {
-    const data = await fetch('/api/installer/apply', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-    }).then(r => r.json());
-    _renderInstallerRows(data, out);
-    _psBackupNotice(data);
-    const globals = installed
-      .filter(c => (c.scope || '') === 'global' ||
-                   (_PS_CLIENTS.find(x => x.slug === c.slug) || {}).requires_project_dir === false)
-      .map(c => (_PS_CLIENTS.find(x => x.slug === c.slug) || {}).label || c.slug);
-    if (globals.length) _psRenderRestartBanner(globals, out);
-    _renderAiClients();
-    _loadGlobalAiList();   // refresh the global-AI matrix in place (was stale until restart)
-  } catch (e) {
-    out.innerHTML = `<div style="color:red">${escapeHtml(String(e))}</div>`;
+  // Apply each entry with ITS OWN folder. A single bulk apply with one
+  // project_dir would write every project client into the same folder (anchor /
+  // last), leaving the others empty — so loop per entry, each to its project_dir.
+  const allRows = [];
+  const globals = [];
+  for (const c of installed) {
+    const client = _PS_CLIENTS.find(x => x.slug === c.slug) || {};
+    const cProjDir = client.requires_project_dir ? (c.project_dir || projDir) : '';
+    const body = { clients: [c.slug] };
+    if (_PS_SLUG) body.slug = _PS_SLUG;
+    if (cProjDir) body.project_dir = cProjDir;
+    try {
+      const data = await fetch('/api/installer/apply', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      }).then(r => r.json());
+      (data.clients || []).forEach(r => allRows.push(r));
+      _psBackupNotice(data);
+      if (!client.requires_project_dir) globals.push(client.label || c.slug);
+    } catch (e) {
+      allRows.push({ slug: c.slug, status: 'failed', detail: String(e) });
+    }
   }
+  _renderInstallerRows({ clients: allRows }, out);
+  if (globals.length) _psRenderRestartBanner(globals, out);
+  _renderAiClients();
+  _loadGlobalAiList();   // refresh the global-AI matrix in place (was stale until restart)
 }
 
 // Amber "restart these global apps" banner, appended under a result area.
