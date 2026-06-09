@@ -189,10 +189,27 @@ def main() -> None:
     if out_zip.exists():
         out_zip.unlink()
     print(f"[zip] {out_zip}")
+    # Files that MUST be executable after the user unzips on POSIX (macOS). The
+    # zip's external_attr carries the Unix mode; we force it rather than trust
+    # the staged file's mode, because the launcher is committed 100644 (the dev
+    # commits from Windows where git does not track the exec bit) and a 644
+    # ``.command`` cannot be double-clicked ("cannot be opened"). Host-independent
+    # so a Windows build runner still emits an executable mac launcher.
+    exec_in_zip = {"start-mweft.command", "uv"}
     with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED) as z:
-        for f in stage.rglob("*"):
-            if f.is_file():
-                z.write(f, f.relative_to(stage.parent))
+        for f in sorted(stage.rglob("*")):
+            if not f.is_file():
+                continue
+            arc = str(f.relative_to(stage.parent))
+            zi = zipfile.ZipInfo.from_file(f, arc)
+            zi.compress_type = zipfile.ZIP_DEFLATED
+            mode = (zi.external_attr >> 16) & 0o7777
+            if f.name in exec_in_zip:
+                mode = 0o755
+            elif mode == 0:
+                mode = 0o644
+            zi.external_attr = (mode << 16) | (zi.external_attr & 0xFFFF)
+            z.writestr(zi, f.read_bytes())
     size = out_zip.stat().st_size / 1e6
     print(f"\n=== {out_zip.name} ({size:.0f} MB) — mode={args.mode} ===")
 
