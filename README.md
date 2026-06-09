@@ -135,7 +135,7 @@ pip install -e .[embed-onnx]
 Export the BGE-M3 model to ONNX once (`optimum-cli export onnx -m
 BAAI/bge-m3 ./models/bge-m3-onnx`) and point `EMBEDDING_ONNX_PATH` at it.
 Prefer a zero-setup API key, or PyTorch-managed weights instead? See the
-embedding options in [install.md](install.md#embedding--onnx-openai-or-pytorch).
+embedding options in [install.md](docs/install.md#embedding--onnx-openai-or-pytorch).
 
 Then register the server with your MCP client — all configuration goes in
 the client's `env` block, no separate config file. Example for Claude Code
@@ -159,15 +159,15 @@ the client's `env` block, no separate config file. Example for Claude Code
 
 Full setup — client matrix (Claude Code / Desktop, Cursor, Gemini CLI),
 SQLite vs PostgreSQL backends, and all env knobs — see
-[install.md](install.md).
+[install.md](docs/install.md).
 
 An optional native desktop app (`mweft-app`) gives you a window to browse
 domains, tags, entities, and search. Install the `manager` extra
 (`pip install -e .[manager]`) and see
-[install.md](install.md#manager-desktop-app-mweft-app).
+[install.md](docs/install.md#manager-desktop-app-mweft-app).
 
 For getting the LLM to use MWeft well (search heuristics, save triggers,
-the connection-map hint), see [prompt_guide.md](prompt_guide.md) — drop
+the connection-map hint), see [prompt_guide.md](docs/prompt_guide.md) — drop
 the snippet into your `CLAUDE.md` / `GEMINI.md` / `.cursorrules`.
 
 ## First run & antivirus

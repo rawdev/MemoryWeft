@@ -128,7 +128,7 @@ pip install -e .[embed-onnx]
 BGE-M3 모델을 ONNX로 한 번 export 하고
 (`optimum-cli export onnx -m BAAI/bge-m3 ./models/bge-m3-onnx`)
 `EMBEDDING_ONNX_PATH`로 가리키세요. 키 한 줄로 끝나는 API 방식이나 PyTorch
-관리 가중치가 더 편하다면 [install.md](install.md#embedding--onnx-openai-or-pytorch)의
+관리 가중치가 더 편하다면 [install.md](docs/install.md#embedding--onnx-openai-or-pytorch)의
 임베딩 옵션을 참고하세요.
 
 그다음 MCP 클라이언트에 서버를 등록합니다 — 모든 설정은 클라이언트의
@@ -152,16 +152,16 @@ BGE-M3 모델을 ONNX로 한 번 export 하고
 ```
 
 전체 설정 — 클라이언트별(Claude Code / Desktop, Cursor, Gemini CLI),
-SQLite vs PostgreSQL 백엔드, 모든 env 항목 — 은 [install.md](install.md)를
+SQLite vs PostgreSQL 백엔드, 모든 env 항목 — 은 [install.md](docs/install.md)를
 참고하세요.
 
 선택적 네이티브 데스크탑 앱(`mweft-app`)은 도메인·태그·엔티티·검색을
 둘러볼 수 있는 창을 제공합니다. `manager` extra
 (`pip install -e .[manager]`)를 설치하고
-[install.md](install.md#manager-desktop-app-mweft-app)를 참고하세요.
+[install.md](docs/install.md#manager-desktop-app-mweft-app)를 참고하세요.
 
 LLM이 MWeft를 잘 쓰도록 만드는 방법(검색 휴리스틱, 저장 트리거, 연결 맵
-힌트)은 [prompt_guide.md](prompt_guide.md)를 참고하세요 — 스니펫을
+힌트)은 [prompt_guide.md](docs/prompt_guide.md)를 참고하세요 — 스니펫을
 `CLAUDE.md` / `GEMINI.md` / `.cursorrules`에 넣으면 됩니다.
 
 ## 첫 실행 & 백신
