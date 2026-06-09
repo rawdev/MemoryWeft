@@ -36,3 +36,6 @@ models/
 .claude/
 .idea/
 .DS_Store
+
+# Private source asset — never publish to the OSS repo
+icon_src.png
