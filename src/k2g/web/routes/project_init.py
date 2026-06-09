@@ -85,6 +85,14 @@ class BackendPostgres(BaseModel):
     dsn: str = Field(
         ..., description="postgresql://user:pass@host:port/db",
     )
+    data_dir: str = Field(
+        default="",
+        description=(
+            "Local folder for object storage (raw memory originals) + logs. "
+            "PG keeps graph/vector remote; this is the local anchor (DATA_DIR). "
+            "When empty, falls back to the project/IDE folder."
+        ),
+    )
 
 
 class EmbeddingConfigIn(BaseModel):
@@ -215,14 +223,23 @@ def init_project(
         if not dsn.startswith(("postgres://", "postgresql://")):
             raise HTTPException(
                 status_code=400, detail="postgres dsn must start with 'postgresql://'")
-        # Postgres has no data folder — anchor object storage/logs on
-        # project_dir. Preserve the existing local anchor when none is supplied,
-        # so a re-save (e.g. the first-run onboarding) doesn't empty it and make
-        # object storage resolve to the drive root.
-        _ex = get_project(body.slug) if body.slug else None
-        db_dir = proj_dir or ((_ex.db_dir or _ex.project_dir) if _ex else "")
         backend_kind = "postgres"
         postgres_dsn = dsn
+        # Postgres keeps graph/vector remote, but object storage (raw memory
+        # originals) + logs are LOCAL → DATA_DIR. Use the explicit data_dir when
+        # given (and create it); else fall back to the IDE/project folder or the
+        # existing anchor so a re-save doesn't empty it (an empty DATA_DIR makes
+        # object storage resolve to the drive root — stray F:\objects etc.).
+        if body.backend.data_dir:
+            db_dir = str(Path(body.backend.data_dir).expanduser().resolve())
+            try:
+                Path(db_dir).mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                raise HTTPException(
+                    status_code=400, detail=f"data_dir not creatable: {exc}") from exc
+        else:
+            _ex = get_project(body.slug) if body.slug else None
+            db_dir = proj_dir or ((_ex.db_dir or _ex.project_dir) if _ex else "")
 
     # Resolve which registry entry to write: an explicit slug (name-only
     # registration → setup picks its DB folder) wins; else dedup by db_dir; else

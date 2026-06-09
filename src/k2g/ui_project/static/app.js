@@ -3636,6 +3636,10 @@ async function showProjectSetupPanel(initialProjectDir, slug, targetEl) {
   const sqliteDataDir = initialized && cfg.backend.kind === 'sqlite'
     ? cfg.backend.data_dir : (dir || '');
   const pgDsn = initialized && cfg.backend.kind === 'postgres' ? cfg.backend.dsn : '';
+  // PG local anchor: object storage (raw memory originals) + logs. PG keeps
+  // graph/vector remote, but this folder is local. get_project_config reports
+  // the effective data_dir (db_dir for an initialised PG project, else a default).
+  const pgDataDir = (cfg && cfg.data_dir) || '';
   // Embedding (provider / model / dim). dim "" → resolve from model server-side.
   const emb = (initialized && cfg.embedding) ? cfg.embedding : {};
   // Default to the DEPLOYMENT's provider (portable bundle = onnx), not a
@@ -3657,7 +3661,9 @@ async function showProjectSetupPanel(initialProjectDir, slug, targetEl) {
   // (group / domain / save_tags / search_targets → hot-reload).
   _PS_BEFORE = initialized ? {
     backendKind,
-    data_dir: cfg.backend.kind === 'sqlite' ? (cfg.backend.data_dir || '') : '',
+    // The local anchor for either backend: SQLite data dir, or the PG data dir
+    // (object storage + logs). Changing it rebinds stores → counts as heavy.
+    data_dir: cfg.backend.kind === 'sqlite' ? (cfg.backend.data_dir || '') : (cfg.data_dir || ''),
     dsn: cfg.backend.kind === 'postgres' ? (cfg.backend.dsn || '') : '',
     group: cfg.group || '',
     domain: cfg.domain || '',
@@ -3695,6 +3701,13 @@ async function showProjectSetupPanel(initialProjectDir, slug, targetEl) {
         <input type="text" id="ps-dsn" value="${escapeHtml(pgDsn)}" placeholder="postgresql://user:pass@host:5432/dbname" style="width:100%" ${initialized ? 'disabled' : ''}>
       </label>
       <div class="muted" style="font-size:11px; margin-top:4px;">${t('ps.pgNote')}</div>
+      <label style="display:block; margin-top:8px;">${t('ps.pgDataDir')}<br>
+        <span style="display:flex; gap:4px;">
+          <input type="text" id="ps-pg-data-dir" value="${escapeHtml(pgDataDir)}" placeholder="C:\\MWEFT\\myproject" style="flex:1">
+          <button type="button" onclick="_psPickPgDataDir()" title="Browse">📁</button>
+        </span>
+      </label>
+      <div class="muted" style="font-size:11px; margin-top:4px;">${t('ps.pgDataDirNote')}</div>
       <div style="font-size:11px; margin-top:4px; color:#b45309; background:#fffbe6; border:1px solid #f0c000; border-radius:4px; padding:6px;">
         ⚠️ ${t('ps.pgCloudWarn')}
         <ul style="margin:4px 0 0 16px; padding:0;">
@@ -3863,6 +3876,13 @@ function _psPickDataDir() {
   }});
 }
 
+function _psPickPgDataDir() {
+  fsBrowser({filter: 'dir', title: 'Object storage / logs folder', onSelect: (p) => {
+    const el = document.getElementById('ps-pg-data-dir');
+    if (el) el.value = p;
+  }});
+}
+
 function _psReload() {
   const dir = (document.getElementById('ps-project-dir') || {}).value || '';
   showProjectSetupPanel(dir);
@@ -3884,17 +3904,19 @@ async function _psSaveCore({silentOnReuse = false} = {}) {
   if (!group || !domain) { target.innerHTML = `<div style="color:red">${t('ps.errSaveRootDomain')}</div>`; return {ok: false}; }
 
   const dataDir = (document.getElementById('ps-data-dir') || {}).value.trim();
+  const pgDataDir = (document.getElementById('ps-pg-data-dir') || {}).value.trim();
   const backend = kind === 'sqlite'
     ? { kind: 'sqlite', data_dir: dataDir }
-    : { kind: 'postgres', dsn: (document.getElementById('ps-dsn') || {}).value.trim() };
+    : { kind: 'postgres', dsn: (document.getElementById('ps-dsn') || {}).value.trim(), data_dir: pgDataDir };
   if (backend.kind === 'sqlite' && !backend.data_dir) {
     target.innerHTML = `<div style="color:red">${t('ps.errDataDir')}</div>`; return {ok: false};
   }
   if (backend.kind === 'postgres' && !backend.dsn) {
     target.innerHTML = `<div style="color:red">${t('ps.errDsn')}</div>`; return {ok: false};
   }
-  // The anchor (DB folder) is the data_dir for sqlite, else the project_dir.
-  const anchor = kind === 'sqlite' ? backend.data_dir : projDir;
+  // The local anchor (object storage + logs) is the data_dir for sqlite, or the
+  // PG data_dir when set (else the project_dir).
+  const anchor = kind === 'sqlite' ? backend.data_dir : (pgDataDir || projDir);
 
   // Search targets: edited domain chips → [{domain}]. Empty → backend preserves
   // the existing config / defaults to [{domain}].
@@ -3966,7 +3988,9 @@ async function _psApplyChanges(dir, before) {
   const kind = (document.querySelector('input[name="ps-backend"]:checked') || {}).value || 'sqlite';
   const after = {
     backendKind: kind,
-    data_dir: kind === 'sqlite' ? (document.getElementById('ps-data-dir') || {}).value.trim() : '',
+    data_dir: kind === 'sqlite'
+      ? (document.getElementById('ps-data-dir') || {}).value.trim()
+      : (document.getElementById('ps-pg-data-dir') || {}).value.trim(),
     dsn: kind === 'postgres' ? (document.getElementById('ps-dsn') || {}).value.trim() : '',
     group: (document.getElementById('ps-group') || {}).value.trim(),
     domain: (document.getElementById('ps-domain') || {}).value.trim(),
