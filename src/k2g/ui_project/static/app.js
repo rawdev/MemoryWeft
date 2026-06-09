@@ -4166,10 +4166,12 @@ async function _psAddAI() {
       filter: 'dir',
       title: t('ps.pickAiFolder', { name: client.label || slug }),
       initial_path: cur || undefined,
+      // Pass the chosen folder straight to the new entry — do NOT write it into
+      // #ps-project-dir. That field is the PROJECT anchor; overwriting it with an
+      // AI's folder corrupts the project and (via reapply) collapses other AIs
+      // onto the same folder.
       onSelect: (p) => {
-        const el = document.getElementById('ps-project-dir');
-        if (el) el.value = p;
-        _psDoAddAI(slug, client);
+        _psDoAddAI(slug, client, p);
       },
     });
     return;
@@ -4180,19 +4182,22 @@ async function _psAddAI() {
 // "Add" — register the client in THIS project's AI list (registry) only. It does
 // NOT push any config; that happens on "Install". Folder-scoped clients store the
 // chosen project_dir on the entry so Install knows where to write .mcp.json.
-async function _psDoAddAI(slug, client) {
+async function _psDoAddAI(slug, client, pickedDir) {
   const out = document.getElementById('inst-result');
   // Need a slug to PUT the list against — register the project first if new.
   if (!_PS_SLUG) {
     const saved = await _psSaveCore({ silentOnReuse: true });
     if (!saved.ok) { out.innerHTML = `<div style="color:red">${t('ps.saveFailForm')}</div>`; return; }
   }
+  // The folder for a project client is the one just picked (passed in), NOT the
+  // shared #ps-project-dir (which is the project anchor). Fall back to the anchor
+  // only if no folder was picked.
+  const aiDir = client.requires_project_dir
+    ? (pickedDir || (document.getElementById('ps-project-dir') || {}).value.trim()) : '';
   // Dedup: a GLOBAL client (one fixed config) may appear at most once; a
   // PROJECT client may repeat across folders, so dedup by (slug, project_dir).
-  const dupProjDir = client.requires_project_dir
-    ? (document.getElementById('ps-project-dir') || {}).value.trim() : '';
   const isDup = client.requires_project_dir
-    ? _PS_AI.some(c => c.slug === slug && (c.project_dir || '') === dupProjDir)
+    ? _PS_AI.some(c => c.slug === slug && (c.project_dir || '') === aiDir)
     : _PS_AI.some(c => c.slug === slug);
   if (isDup) {
     out.innerHTML = `<div class="muted">${t('ps.alreadyAdded')}</div>`;
@@ -4200,10 +4205,7 @@ async function _psDoAddAI(slug, client) {
     return;
   }
   const entry = { slug, scope: client.requires_project_dir ? 'project' : 'global' };
-  if (client.requires_project_dir) {
-    const projDir = (document.getElementById('ps-project-dir') || {}).value.trim();
-    if (projDir) entry.project_dir = projDir;
-  }
+  if (aiDir) entry.project_dir = aiDir;
   _PS_AI.push(entry);
   await _persistAiClients();   // add/remove = the only list mutations
   _renderAiClients();

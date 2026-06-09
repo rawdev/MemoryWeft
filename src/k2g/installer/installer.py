@@ -943,19 +943,31 @@ def reapply_for_entry(entry: Any) -> dict[str, Any]:
     error for one client is captured in its result and never raised, so the
     caller (activation) always completes.
     """
-    clients = list(getattr(entry, "ai_clients", None) or [])
-    slugs = [c.get("slug") for c in clients if isinstance(c, dict) and c.get("slug")]
-    if not slugs:
+    clients = [
+        c for c in (getattr(entry, "ai_clients", None) or [])
+        if isinstance(c, dict) and c.get("slug")
+    ]
+    if not clients:
         return {"reapplied": [], "restart_needed": []}
 
-    project_dir = getattr(entry, "project_dir", None) or getattr(entry, "db_dir", None)
+    entry_pd = getattr(entry, "project_dir", None) or getattr(entry, "db_dir", None)
     slug = getattr(entry, "slug", None)
-    try:
-        report = apply(slugs, project_dir=project_dir, entry_slug=slug)
-        reapplied = report.to_dict()["clients"]
-    except Exception as exc:  # noqa: BLE001 — activation must never fail on a client write
-        logger.warning("reapply_for_entry failed: %s", exc)
-        reapplied = [{"slug": s, "status": "failed", "detail": str(exc)} for s in slugs]
+    # Apply each client with ITS OWN project_dir. A project-scoped client
+    # (claude_code, cursor_project, …) may live in a folder different from the
+    # project anchor, and several entries may each target a distinct folder.
+    # Using one shared project_dir for all would collapse every project client
+    # onto the same .mcp.json (the last folder wins). Global clients ignore
+    # project_dir (fixed config path), so the value is moot for them.
+    reapplied: list[dict[str, Any]] = []
+    for c in clients:
+        cslug = c["slug"]
+        c_pd = c.get("project_dir") or entry_pd
+        try:
+            report = apply([cslug], project_dir=c_pd, entry_slug=slug)
+            reapplied.extend(report.to_dict()["clients"])
+        except Exception as exc:  # noqa: BLE001 — activation must never fail on a client write
+            logger.warning("reapply_for_entry: %s failed: %s", cslug, exc)
+            reapplied.append({"slug": cslug, "status": "failed", "detail": str(exc)})
 
     restart_needed: list[dict[str, str]] = []
     for c in clients:
