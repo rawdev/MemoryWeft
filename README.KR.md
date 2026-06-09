@@ -91,7 +91,26 @@ MCP 표면은 엄선된 읽기/저장 도구를 노출합니다:
 - 전체 K2G 빌드 파이프라인(무거운 LLM 적재). MWeft는 `mweft_remember`로
   메모리를 받습니다; 대규모 빌드는 별개 사안입니다.
 
-## 설치
+## 빠른 시작 — 포터블 앱 (Python 불필요)
+
+가장 쉬운 방법 — Python·pip·설정 파일 없이:
+
+1. **[Releases](https://github.com/rawdev/MemoryWeft/releases/latest)** 페이지에서
+   OS에 맞는 `mweft-<os>-<버전>.zip`(예: `mweft-windows-<버전>.zip` /
+   `mweft-macos-<버전>.zip`)을 받습니다.
+2. 아무 곳에나 압축을 풉니다 — 시스템에 설치하지 않는 "압축 풀고 실행" 방식입니다.
+3. 런처를 실행합니다:
+   - **Windows** — **`start-mweft.bat`** 더블클릭
+   - **macOS** — **`start-mweft.command`** 실행 (처음엔 우클릭 → 열기로 Gatekeeper 해제)
+4. **Manager** 창이 열립니다. 프로젝트를 만들고, 메모리를 둘 곳(로컬 SQLite 폴더 또는
+   Postgres DSN)을 정한 뒤, 쓰시는 AI 클라이언트(Claude Desktop, Cursor, Claude Code …)에
+   **MCP 설치**를 누릅니다.
+5. **그 AI 클라이언트를 재시작**하세요. 끝 — `mw 검색 …` / `mw 저장 …`을 부르면 됩니다.
+
+런처는 CPU ONNX 런타임 + BGE-M3 모델을 번들하므로 첫 실행이 API 키 없이 오프라인으로
+동작합니다. (첫 실행은 백신 검사로 느릴 수 있습니다 — 아래 "첫 실행 & 백신" 참고.)
+
+## 설치 (pip, 개발자용)
 
 권장 구성은 로컬 **ONNX** 임베딩입니다 — API 키 불필요, 런타임에 PyTorch
 불필요:

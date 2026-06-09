@@ -95,7 +95,27 @@ Not in this distribution (yet):
 - The full K2G build pipeline (heavy LLM ingestion). MWeft accepts memory
   via `mweft_remember`; large-scale build is a separate concern.
 
-## Install
+## Quickstart — portable app (no Python)
+
+The easiest way to run MWeft — no Python, no pip, no config files:
+
+1. Download `mweft-<your-os>-<version>.zip` (e.g. `mweft-windows-<version>.zip` /
+   `mweft-macos-<version>.zip`) from the
+   **[Releases](https://github.com/rawdev/MemoryWeft/releases/latest)** page.
+2. Unzip it anywhere — it's extract-and-run; nothing is installed system-wide.
+3. Start the launcher:
+   - **Windows** — double-click **`start-mweft.bat`**
+   - **macOS** — run **`start-mweft.command`** (first time: right-click → Open to clear Gatekeeper)
+4. The **Manager** window opens. Create a project, choose where your memory lives
+   (a local SQLite folder, or a Postgres DSN), then click **Install MCP** for your
+   AI client (Claude Desktop, Cursor, Claude Code, …).
+5. **Restart that AI client.** Done — say `mw search …` / `mw save …`.
+
+The launcher bundles a CPU ONNX runtime + the BGE-M3 model, so the first run works
+fully offline with no API key. (The first run can be slow while antivirus scans the
+files — see "First run & antivirus" below.)
+
+## Install via pip (developers)
 
 The recommended setup uses local **ONNX** embeddings — no API key, and no
 PyTorch at runtime:
