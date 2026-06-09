@@ -22,6 +22,28 @@ STAMP="$HERE/runtime/.version"
 xattr -dr com.apple.quarantine "$HERE" 2>/dev/null || true
 chmod +x "$UV" 2>/dev/null || true
 
+# --- macOS privacy (TCC) warning -------------------------------------------
+# Downloads / Desktop / Documents are protected: a sandboxed AI client (Claude,
+# etc.) cannot read files there, so it is blocked from launching the MCP server
+# out of such a folder — the server then dies with "No module named 'encodings'".
+# The Manager (run from this Terminal) still works, so warn rather than block.
+case "$HERE/" in
+  "$HOME/Downloads/"*|"$HOME/Desktop/"*|"$HOME/Documents/"*|"$HOME/Library/Mobile Documents/"*)
+    echo "============================================================"
+    echo "[MWeft] WARNING: this folder is in a macOS privacy-protected location:"
+    echo "          $HERE"
+    echo "  Your AI client (Claude, etc.) will likely be BLOCKED from starting"
+    echo "  the memory server here — the MCP server fails with"
+    echo "  \"ModuleNotFoundError: No module named 'encodings'\"."
+    echo "  Fix: move this folder to your home directory, e.g.:"
+    echo "          mv \"$HERE\" ~/"
+    echo "  (or grant the AI client Full Disk Access in System Settings ->"
+    echo "   Privacy & Security). Keep your memory/data folder out of those"
+    echo "  protected locations too."
+    echo "============================================================"
+    ;;
+esac
+
 # --- Self-contained locations ---
 export UV_PYTHON_INSTALL_DIR="$HERE/runtime/python"
 export UV_CACHE_DIR="$HERE/runtime/cache"

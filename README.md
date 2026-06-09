@@ -102,7 +102,15 @@ The easiest way to run MWeft — no Python, no pip, no config files:
 1. Download `mweft-<your-os>-<version>.zip` (e.g. `mweft-windows-<version>.zip` /
    `mweft-macos-<version>.zip`) from the
    **[Releases](https://github.com/rawdev/MemoryWeft/releases/latest)** page.
-2. Unzip it anywhere — it's extract-and-run; nothing is installed system-wide.
+2. Unzip it — it's extract-and-run; nothing is installed system-wide.
+   - **macOS: do NOT unzip into `Downloads`, `Desktop`, or `Documents`.** Those
+     folders are protected by macOS privacy (TCC), so your AI client (Claude,
+     etc.) is blocked from launching the bundled memory server out of them — the
+     MCP server then fails to start with `ModuleNotFoundError: No module named
+     'encodings'`. Put it in your **home folder** instead, e.g. `~/mweft`.
+     (Alternatively, grant the AI client Full Disk Access in System Settings →
+     Privacy & Security.) Keep your **memory/data folder** out of those
+     protected locations too.
 3. Start the launcher:
    - **Windows** — double-click **`start-mweft.bat`**
    - **macOS** — run **`start-mweft.command`** (first time: right-click → Open to clear Gatekeeper)

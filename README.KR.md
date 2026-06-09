@@ -98,7 +98,13 @@ MCP 표면은 엄선된 읽기/저장 도구를 노출합니다:
 1. **[Releases](https://github.com/rawdev/MemoryWeft/releases/latest)** 페이지에서
    OS에 맞는 `mweft-<os>-<버전>.zip`(예: `mweft-windows-<버전>.zip` /
    `mweft-macos-<버전>.zip`)을 받습니다.
-2. 아무 곳에나 압축을 풉니다 — 시스템에 설치하지 않는 "압축 풀고 실행" 방식입니다.
+2. 압축을 풉니다 — 시스템에 설치하지 않는 "압축 풀고 실행" 방식입니다.
+   - **macOS: `다운로드`·`데스크탑`·`도서`(Documents) 폴더에 풀지 마세요.** 이 폴더들은
+     macOS 개인정보 보호(TCC)로 보호돼서, AI 클라이언트(Claude 등)가 그 안의 번들로
+     메모리 서버를 **띄우지 못합니다** — MCP 서버가 `ModuleNotFoundError: No module
+     named 'encodings'` 로 죽습니다. **홈 폴더**(예: `~/mweft`)에 두세요. (또는 시스템
+     설정 → 개인정보 보호 및 보안 → 전체 디스크 접근 권한에 AI 클라이언트를 추가.)
+     **메모리/데이터 폴더**도 이 보호 폴더들 밖에 두세요.
 3. 런처를 실행합니다:
    - **Windows** — **`start-mweft.bat`** 더블클릭
    - **macOS** — **`start-mweft.command`** 실행 (처음엔 우클릭 → 열기로 Gatekeeper 해제)
