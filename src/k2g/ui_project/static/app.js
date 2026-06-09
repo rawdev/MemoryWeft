@@ -56,10 +56,18 @@ async function _loadGlobalAiList() {
         const action = c.pointed_slug
           ? `<button onclick="showTab('settings')">${t('globalAi.colAction')}</button>`
           : '';
+        // Per-client note: how a global install behaves if the same tool also has
+        // a project-level install of the mweft server. Guard against a missing key
+        // (t() returns the key itself when absent).
+        const ckey = 'globalAi.conflict.' + c.slug;
+        const cnote = t(ckey);
+        const conflictHtml = (cnote && cnote !== ckey)
+          ? `<div class="muted" style="font-size:11px; margin-top:3px; line-height:1.4;">${cnote}</div>`
+          : '';
         return `<tr>
-          <td style="padding:6px 8px; border-top:1px solid #eee;">${escapeHtml(c.label)}</td>
-          <td style="padding:6px 8px; border-top:1px solid #eee;">${pointed}</td>
-          <td style="padding:6px 8px; border-top:1px solid #eee;">${action}</td>
+          <td style="padding:6px 8px; border-top:1px solid #eee;">${escapeHtml(c.label)}${conflictHtml}</td>
+          <td style="padding:6px 8px; border-top:1px solid #eee; vertical-align:top;">${pointed}</td>
+          <td style="padding:6px 8px; border-top:1px solid #eee; vertical-align:top;">${action}</td>
         </tr>`;
       }).join('')}</tbody></table>`;
   } catch (e) {
@@ -4108,7 +4116,10 @@ function _renderAiClients() {
     box.innerHTML = `<div class="muted">${t('ps.noneInstalled')}</div>`;
     return;
   }
-  box.innerHTML = _PS_AI.map(c => {
+  // Identity is the LIST INDEX, not the slug: a project-scoped client
+  // (claude_code, cursor_project, …) may appear multiple times for different
+  // folders, so the same slug is not unique. Install/Remove target one row.
+  box.innerHTML = _PS_AI.map((c, idx) => {
     const meta = _PS_CLIENTS.find(x => x.slug === c.slug) || {};
     const label = meta.label || c.slug;
     const scope = c.scope || meta.scope || (meta.requires_project_dir ? 'project' : 'global');
@@ -4117,8 +4128,8 @@ function _renderAiClients() {
       <div class="event-item">
         <div style="display:flex; align-items:center; gap:8px;">
           <b>${escapeHtml(label)}</b>
-          <button class="primary" onclick="_psInstallAI('${escapeHtml(c.slug)}')" style="font-size:11px;">${t('ps.installAi')}</button>
-          <button onclick="_psRemoveAI('${escapeHtml(c.slug)}','${escapeHtml(label)}')" style="color:#b91c1c; font-size:11px;">${t('ps.removeAi')}</button>
+          <button class="primary" onclick="_psInstallAI(${idx})" style="font-size:11px;">${t('ps.installAi')}</button>
+          <button onclick="_psRemoveAI(${idx})" style="color:#b91c1c; font-size:11px;">${t('ps.removeAi')}</button>
           <span class="muted" style="font-size:11px;">· ${escapeHtml(scope)}</span>
         </div>
         <div class="muted" style="font-size:11px;">${escapeHtml(where)}</div>
@@ -4176,7 +4187,14 @@ async function _psDoAddAI(slug, client) {
     const saved = await _psSaveCore({ silentOnReuse: true });
     if (!saved.ok) { out.innerHTML = `<div style="color:red">${t('ps.saveFailForm')}</div>`; return; }
   }
-  if (_PS_AI.some(c => c.slug === slug)) {
+  // Dedup: a GLOBAL client (one fixed config) may appear at most once; a
+  // PROJECT client may repeat across folders, so dedup by (slug, project_dir).
+  const dupProjDir = client.requires_project_dir
+    ? (document.getElementById('ps-project-dir') || {}).value.trim() : '';
+  const isDup = client.requires_project_dir
+    ? _PS_AI.some(c => c.slug === slug && (c.project_dir || '') === dupProjDir)
+    : _PS_AI.some(c => c.slug === slug);
+  if (isDup) {
     out.innerHTML = `<div class="muted">${t('ps.alreadyAdded')}</div>`;
     _renderAiClients();
     return;
@@ -4195,9 +4213,11 @@ async function _psDoAddAI(slug, client) {
 // "Install" — the ONLY action that applies config. Pushes the mweft MCP server block
 // + prompt into the client's config file for one listed client. Does not change
 // the list (the client is already in it).
-async function _psInstallAI(slug) {
+async function _psInstallAI(idx) {
   const out = document.getElementById('inst-result');
-  const ai = _PS_AI.find(c => c.slug === slug) || {};
+  const ai = _PS_AI[idx];
+  if (!ai) return;
+  const slug = ai.slug;
   const client = _PS_CLIENTS.find(c => c.slug === slug) || {};
   // Save first so the installer derives the latest env (DATA_DIR/domain/…) from
   // the registry entry — global clients need it too.
@@ -4241,12 +4261,15 @@ async function _psInstallAI(slug) {
   }
 }
 
-// "Remove" — uninstall the config from the client AND drop the slug from the list.
-async function _psRemoveAI(slug, label) {
+// "Remove" — uninstall the config from the client AND drop THIS row from the list.
+async function _psRemoveAI(idx) {
+  const ai = _PS_AI[idx];
+  if (!ai) return;
+  const slug = ai.slug;
+  const client = _PS_CLIENTS.find(c => c.slug === slug) || {};
+  const label = client.label || slug;
   if (!confirm(t('ps.confirmRemoveAi', { name: label }))) return;
   const out = document.getElementById('inst-result');
-  const client = _PS_CLIENTS.find(c => c.slug === slug) || {};
-  const ai = _PS_AI.find(c => c.slug === slug) || {};
   const projDir = client.requires_project_dir
     ? (ai.project_dir || (document.getElementById('ps-project-dir') || {}).value.trim()) : '';
   out.innerHTML = `<div class="muted"><span class="sx-spinner"></span> ${t('common.loading')}</div>`;
@@ -4257,7 +4280,7 @@ async function _psRemoveAI(slug, label) {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     }).then(r => r.json());
     _renderInstallerRows(data, out);
-    _PS_AI = _PS_AI.filter(c => c.slug !== slug);
+    _PS_AI.splice(idx, 1);       // remove THIS row only (slug may repeat per folder)
     await _persistAiClients();   // add/remove = the only list mutations
     _renderAiClients();
     _loadGlobalAiList();   // refresh the global-AI matrix in place (was stale until restart)
