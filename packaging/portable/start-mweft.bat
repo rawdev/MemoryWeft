@@ -20,6 +20,14 @@ set "READY=%HERE%.mweft-ready"
 REM --- Self-contained locations (no system intrusion) ---
 set "UV_PYTHON_INSTALL_DIR=%HERE%runtime\python"
 set "UV_CACHE_DIR=%HERE%runtime\cache"
+REM Use a uv-managed standalone Python ONLY. Never adopt a Python already on the
+REM host (e.g. a conda base env): an inherited interpreter leaks its own DLL
+REM search dirs - an older vcruntime/msvcp wins and onnxruntime's native module
+REM then fails to load (WinError 1114) - and the venv is not self-contained on
+REM machines that lack that interpreter. only-managed makes uv download a
+REM python-build-standalone into UV_PYTHON_INSTALL_DIR (needs network on first
+REM setup).
+set "UV_PYTHON_PREFERENCE=only-managed"
 
 REM --- Runtime settings ---
 set "K2G_DOTENV_FILE=off"
@@ -50,7 +58,7 @@ if exist "%READY%" if exist "%PYEXE%" goto launch
 echo [MWeft] First-time setup... (once only, 1-5 min depending on network/specs)
 REM Pin to 3.11 to match the cp311 wheels bundled by the offline build
 REM (release.yml uses Python 3.11). Keep both sides in lockstep when bumping.
-"%UV%" venv "%VENV%" --python 3.11
+"%UV%" venv "%VENV%" --python 3.11 --python-preference only-managed
 if errorlevel 1 goto err
 if exist "%HERE%wheels" (
   REM full-offline: use bundled wheels only (zero network)
@@ -60,6 +68,13 @@ if exist "%HERE%wheels" (
   "%UV%" pip install --python "%PYEXE%" %PKG%
 )
 if errorlevel 1 goto err
+REM Belt: onnxruntime.dll's own directory is ALWAYS searched for its native
+REM dependencies, even under altered DLL search (add_dll_directory). Place the
+REM bundled MSVC runtime right next to it so no host copy (e.g. an older conda
+REM vcruntime/msvcp) can win and break the native load (WinError 1114). This is
+REM Microsoft's sanctioned app-local deployment and is host-independent.
+set "ORT_CAPI=%VENV%\Lib\site-packages\onnxruntime\capi"
+if exist "%ORT_CAPI%" copy /y "%HERE%vc_runtime\*.dll" "%ORT_CAPI%\" >nul 2>&1
 if exist "%HERE%VERSION" copy /y "%HERE%VERSION" "%STAMP%" >nul
 echo ready> "%READY%"
 

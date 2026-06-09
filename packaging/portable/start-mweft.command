@@ -25,6 +25,12 @@ chmod +x "$UV" 2>/dev/null || true
 # --- Self-contained locations ---
 export UV_PYTHON_INSTALL_DIR="$HERE/runtime/python"
 export UV_CACHE_DIR="$HERE/runtime/cache"
+# Use a uv-managed standalone Python ONLY. Never adopt a Python already on the
+# host (e.g. a conda/homebrew base): an inherited interpreter is not
+# self-contained and leaks its own library search paths into our process.
+# only-managed makes uv download a python-build-standalone into
+# UV_PYTHON_INSTALL_DIR (needs network on first setup).
+export UV_PYTHON_PREFERENCE=only-managed
 
 # --- Runtime settings ---
 export K2G_DOTENV_FILE=off
@@ -47,7 +53,7 @@ if [ ! -f "$READY" ] || [ ! -x "$PYEXE" ]; then
   echo "[MWeft] First-time setup... (once only, 1-5 min depending on network/specs)"
   # Pin to 3.11 to match the cp311 wheels bundled by the offline build
   # (release.yml uses Python 3.11). Keep both sides in lockstep when bumping.
-  "$UV" venv "$VENV" --python 3.11
+  "$UV" venv "$VENV" --python 3.11 --python-preference only-managed
   if [ -d "$HERE/wheels" ]; then
     # full-offline: use bundled wheels only (zero network)
     "$UV" pip install --python "$PYEXE" --no-index --find-links "$HERE/wheels" "$PKG"

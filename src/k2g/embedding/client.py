@@ -239,6 +239,7 @@ class OnnxEmbeddingClient:
         """
         if not sys.platform.startswith("win"):
             return
+        import ctypes
         import os
 
         candidates: list[Path] = []
@@ -253,19 +254,47 @@ class OnnxEmbeddingClient:
         except Exception:  # noqa: BLE001
             pass
 
+        # The MSVC runtime DLLs onnxruntime's native module links against. The
+        # order matters only in that all should be present together.
+        vc_dlls = (
+            "vcruntime140.dll", "vcruntime140_1.dll",
+            "msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll",
+        )
         seen: set[str] = set()
         for d in candidates:
             key = str(d).lower()
             if key in seen:
                 continue
             seen.add(key)
+            if not d.is_dir():
+                continue
             try:
-                if d.is_dir():
-                    os.add_dll_directory(str(d))
-                    logger.debug("Added bundled DLL dir for onnxruntime: %s", d)
-                    return
+                os.add_dll_directory(str(d))
             except Exception as exc:  # noqa: BLE001
                 logger.debug("Could not add DLL dir %s: %s", d, exc)
+            # add_dll_directory ALONE is unreliable: when another component
+            # (e.g. a conda base env) has already registered an *older*
+            # vcruntime/msvcp directory, the loader searches user dirs in
+            # registration order and binds the stale copy first -> onnxruntime's
+            # native module fails with WinError 1114 ("DLL init routine failed").
+            # Force the bundled runtime into the process by absolute path; once a
+            # module is loaded, later dependencies bind to it by base name
+            # regardless of search order, so the stale copy can no longer win.
+            preloaded = 0
+            for name in vc_dlls:
+                dll = d / name
+                if dll.is_file():
+                    try:
+                        ctypes.WinDLL(str(dll))
+                        preloaded += 1
+                    except OSError as exc:
+                        logger.debug("Could not preload %s: %s", dll, exc)
+            logger.debug(
+                "Registered bundled VC runtime dir %s (preloaded %d DLL(s))",
+                d, preloaded,
+            )
+            if preloaded:
+                return
 
     def __init__(
         self, model_path: str, embedding_dim: int, max_length: int = 512,
