@@ -71,19 +71,45 @@ def _resolve_k2g_mcp_command() -> str:
     Some MCP clients (notably Gemini CLI on Windows) strip the parent
     shell's ``PATH`` when spawning the MCP subprocess, so a bare
     ``k2g-mcp`` shim name fails even when it resolves fine in the
-    terminal.  Pinning to the absolute path next to ``sys.executable``
-    makes the config portable across clients without depending on PATH
-    inheritance.
+    terminal.  Pinning to the absolute path makes the config portable
+    across clients without depending on PATH inheritance.
+
+    The console script lives in the venv's scripts dir (``bin`` on
+    POSIX, ``Scripts`` on Windows). We locate it via
+    ``sysconfig.get_path("scripts")`` — the canonical answer for the
+    running environment — and fall back to ``sys.executable``'s parent
+    *without* resolving symlinks. The non-resolved path matters on
+    macOS/Linux: a venv's ``bin/python`` is a symlink to the base
+    interpreter, so ``Path(sys.executable).resolve().parent`` escapes
+    the venv to the base ``bin`` (where ``k2g-mcp`` is absent) and the
+    command silently degraded to a bare ``k2g-mcp`` that the client
+    then failed to spawn ("No such file or directory").
 
     Falls back to the literal ``"k2g-mcp"`` when the script is not
-    present alongside the active interpreter (test environments, alt
-    installs); clients that inherit PATH still work in that case.
+    found (test environments, alt installs); clients that inherit PATH
+    still work in that case.
     """
-    exe_dir = Path(sys.executable).resolve().parent
-    for name in ("k2g-mcp.exe", "k2g-mcp"):
-        candidate = exe_dir / name
-        if candidate.is_file():
-            return str(candidate)
+    import sysconfig
+
+    search_dirs: list[Path] = []
+    # No .resolve(): keep the venv path, do not follow the python symlink
+    # back to the base interpreter (POSIX venvs put bin/python as a symlink).
+    search_dirs.append(Path(sys.executable).parent)
+    # Secondary net: the canonical scripts dir for the running environment.
+    scripts = sysconfig.get_path("scripts")
+    if scripts:
+        search_dirs.append(Path(scripts))
+
+    seen: set[str] = set()
+    for d in search_dirs:
+        key = str(d)
+        if key in seen:
+            continue
+        seen.add(key)
+        for name in ("k2g-mcp.exe", "k2g-mcp"):
+            candidate = d / name
+            if candidate.is_file():
+                return str(candidate)
     return "k2g-mcp"
 
 
