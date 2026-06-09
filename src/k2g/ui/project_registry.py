@@ -336,12 +336,21 @@ def entry_env_dict(entry: ProjectEntry) -> dict[str, str]:
         "EMBEDDING_MODEL": model,
         "EMBEDDING_DIM": str(dim),
     }
-    # Propagate the deployment-specific ONNX model path (set by the portable
-    # launcher) so an onnx project's spawned MCP server can find the bundled model.
+    # Propagate the deployment-specific ONNX paths (set by the portable launcher)
+    # so an onnx project's spawned MCP server can find the bundled model AND the
+    # bundled MSVC runtime. The AI client spawns k2g-mcp.exe directly, bypassing
+    # start-mweft.bat, so without these the server inherits none of the launcher's
+    # env: onnxruntime's native .pyd then fails to load on a clean Windows box
+    # ("DLL load failed" — missing vcruntime140). MWEFT_VC_RUNTIME_DIR points
+    # add_dll_directory at <bundle>/vc_runtime *before* the import; relying only on
+    # deriving it from the model path is fragile (cwd / layout dependent).
     if provider == "onnx":
         onnx_path = os.environ.get("EMBEDDING_ONNX_PATH")
         if onnx_path:
             env["EMBEDDING_ONNX_PATH"] = onnx_path
+        vc_runtime_dir = os.environ.get("MWEFT_VC_RUNTIME_DIR")
+        if vc_runtime_dir:
+            env["MWEFT_VC_RUNTIME_DIR"] = vc_runtime_dir
     is_pg = (entry.backend == "postgres") or bool(entry.postgres_dsn)
     # DATA_DIR is the *local* anchor for object storage (raw memory originals)
     # and log files — both exist even in Postgres mode (only graph/vector live
