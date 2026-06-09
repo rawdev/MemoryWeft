@@ -126,7 +126,7 @@ def _build_default_server_block(
     When ``project_dir`` is supplied and ``.mweft/project.yaml`` exists
     (or can be installed from the template), the env dict comes from
     ``ProjectConfig.to_env_dict()`` — same shape the UI subprocess uses.
-    Without that, only ``K2G_DOTENV_FILE=""`` is written and the user has
+    Without that, only ``K2G_DOTENV_FILE=off`` is written and the user has
     to hand-edit (which is what was happening before).
 
     ``command`` defaults to the absolute path of ``k2g-mcp`` next to the
@@ -196,7 +196,10 @@ def _env_for_project(project_dir: str | Path | None) -> dict[str, str]:
     if project_dir is None:
         project_dir = _active_project_dir()
     if project_dir is None:
-        return {"K2G_DOTENV_FILE": ""}
+        # Non-empty opt-out sentinel: some MCP clients drop empty-string env
+        # values at spawn, so "" would arrive unset and the server would
+        # hard-fail looking for a .mwf. "off" survives and opts out.
+        return {"K2G_DOTENV_FILE": "off"}
     from k2g.ui.project_registry import entry_env_dict, find_by_dir
     entry = find_by_dir(project_dir)
     if entry is None:

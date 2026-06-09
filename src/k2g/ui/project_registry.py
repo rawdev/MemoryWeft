@@ -322,7 +322,12 @@ def entry_env_dict(entry: ProjectEntry) -> dict[str, str]:
         "K2G_USER_MEMORY_SAVE_DOMAIN": domain,
         "K2G_USER_SEARCH_TARGETS": search_targets_to_csv(targets),
         "K2G_USER_MEMORY_SAVE_TAGS": ",".join(entry.save_tags or []),
-        "K2G_DOTENV_FILE": "",
+        # Opt out of .mwf — env owns all config. MUST be a non-empty sentinel:
+        # some MCP clients drop empty-string env values when spawning the server,
+        # so "" would arrive as *unset* and the server would hard-fail looking for
+        # a .mwf ("startup aborted"). "off" survives serialization and is treated
+        # as opt-out by both _resolve_env_file and _require_mwf_file.
+        "K2G_DOTENV_FILE": "off",
         # Defer store/embedding build to the first tool call so the MCP server
         # starts listening immediately. Eager init can take ~10s (sqlite) to ~60s
         # (remote Postgres — schema setup is many DDL round-trips over the pooler,

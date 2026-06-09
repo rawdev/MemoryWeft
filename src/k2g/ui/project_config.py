@@ -135,8 +135,11 @@ class ProjectConfig:
             "K2G_USER_SEARCH_TARGETS": search_targets_to_csv(self.search_targets),
             # Curated save-tag candidates (CSV). Settings parses CSV → list.
             "K2G_USER_MEMORY_SAVE_TAGS": ",".join(self.save_tags),
-            # UI-spawned subprocesses must ignore .mwf.
-            "K2G_DOTENV_FILE": "",
+            # Spawned subprocesses must ignore .mwf. Non-empty opt-out sentinel:
+            # some MCP clients drop empty-string env at spawn, so "" would arrive
+            # unset and the server would hard-fail looking for a .mwf. "off" opts
+            # out and survives serialization.
+            "K2G_DOTENV_FILE": "off",
             "DATA_DIR": self.data_dir,
             "EMBEDDING_PROVIDER": self.embedding.provider,
             "EMBEDDING_MODEL": self.embedding.model,
