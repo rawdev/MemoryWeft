@@ -28,8 +28,8 @@ MemoryWeft는 **Event-Centric Knowledge Graph(ECKG)** 아이디어를 구현한 
 엔티티와 이벤트 모두 벡터 임베딩(기본 BGE-M3, 프로세스 내 임베딩)을
 갖습니다. 검색은 히트된 내용 뿐만 아니라, **연결 맵 힌트(connection-map hint)** 를 반환합니다 — 인접 이벤트, 공유 엔티티, 동시출현 이웃, 의미적으로 유사한 이벤트를 반환해서 AI의 추가 행동을 유도합니다.
 
-원시 그래프 위에서 MWeft는 엔티티 그래프와 이벤트 그래프 양쪽에 **라이덴
-커뮤니티 탐지(Leiden community detection)**를 돌려 자동으로 클러스터를
+원시 그래프 위에서 MWeft는 엔티티 그래프와 이벤트 그래프 양쪽에 라이덴
+커뮤니티 탐지(Leiden community detection)를 돌려 자동으로 클러스터를
 만들어 냅니다. `mweft_auto_tag_*` 와 `mweft_community_*` 도구로 LLM이
 클러스터 구조를 요약하고 특정 커뮤니티의 멤버로 파고들 수 있습니다.
 

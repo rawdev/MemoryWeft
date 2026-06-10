@@ -39,3 +39,5 @@ models/
 
 # Private source asset — never publish to the OSS repo
 icon_src.png
+CLAUDE.md
+.mcp.json.mweft-bak
