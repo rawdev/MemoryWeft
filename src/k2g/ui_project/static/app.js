@@ -2082,6 +2082,18 @@ function renderTagEdit() {
         </div>
         <div id="pd-grp-merge" class="muted" style="font-size:12px; margin-top:4px;"></div>
       </div>
+      <div class="sx-sub-h">${t('pd.tag.moveTitle')}</div>
+      <div style="padding:8px; border-bottom:1px solid #eee;">
+        <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+          <select id="pd-grp-move-src" style="max-width:40%"></select>
+          <span class="muted">→</span>
+          <select id="pd-grp-move-dst" style="max-width:40%"></select>
+          <button onclick="pdMoveGroup()">${t('pd.tag.move')}</button>
+          <span class="grow"></span>
+          <button onclick="pdRecomputeLevels()" title="${t('pd.tag.relevelHint')}">${t('pd.tag.relevel')}</button>
+        </div>
+        <div id="pd-grp-move-msg" class="muted" style="font-size:12px; margin-top:4px;"></div>
+      </div>
       <div style="padding:6px 10px; border-bottom:1px solid #f0f0f0;">
         <input type="text" id="pd-grp-filter" placeholder="${t('pd.tag.filterPh')}" style="width:100%"
                oninput="_pdGrpFilter(this.value)">
@@ -2636,8 +2648,14 @@ async function pdLoadGroups() {
     _pdGrpRender();
     // Parent-select dropdown (add tag) — keep as a select, sort by path.
     const sorted = live.slice().sort((a, b) => (a.path || '').localeCompare(b.path || '', 'ko'));
-    if (psel) psel.innerHTML = `<option value="">${t('pd.tag.parentRoot')}</option>`
-      + sorted.map(g => `<option value="${escapeHtml(g.id)}">${escapeHtml(g.path || g.name || g.id)}</option>`).join('');
+    const optsAll = sorted.map(g =>
+      `<option value="${escapeHtml(g.id)}">${escapeHtml(g.path || g.name || g.id)}</option>`).join('');
+    if (psel) psel.innerHTML = `<option value="">${t('pd.tag.parentRoot')}</option>` + optsAll;
+    // Move-tag selects: source (tag to move) + destination (new parent / root).
+    const msrc = document.getElementById('pd-grp-move-src');
+    const mdst = document.getElementById('pd-grp-move-dst');
+    if (msrc) msrc.innerHTML = `<option value="">${t('pd.tag.moveSrcPh')}</option>` + optsAll;
+    if (mdst) mdst.innerHTML = `<option value="">${t('pd.tag.parentRoot')}</option>` + optsAll;
     // Refresh combo if open / has a current selection: keep selection if still alive.
     ['alias', 'canonical'].forEach(w => {
       const sel = w === 'alias' ? _PD.grpMergeAlias : _PD.grpMergeCanonical;
@@ -2700,6 +2718,33 @@ async function pdMergeGroups() {
     });
     pdLoadGroups();
   } catch (e) { out.innerHTML = `<span style="color:red">${escapeHtml(String(e))}</span>`; }
+}
+
+async function pdMoveGroup() {
+  const src = (document.getElementById('pd-grp-move-src') || {}).value || '';
+  const dst = (document.getElementById('pd-grp-move-dst') || {}).value || '';
+  const out = document.getElementById('pd-grp-move-msg');
+  if (!src) { out.innerHTML = `<span style="color:red">${t('pd.tag.moveSelectSrc')}</span>`; return; }
+  if (src === dst) { out.innerHTML = `<span style="color:red">${t('pd.tag.moveSamePar')}</span>`; return; }
+  out.innerHTML = `<span class="muted">${t('pd.tag.moving')}</span>`;
+  try {
+    const data = await _sxPost('/api/predefine/tag-move', { group_id: src, new_parent_id: dst || null });
+    if (data.error) { out.innerHTML = `<span style="color:red">${escapeHtml(data.error)}</span>`; return; }
+    out.innerHTML = `<span style="color:green">${t('pd.tag.moveDone')}</span>`;
+    pdLoadGroups();
+  } catch (e) { out.innerHTML = `<span style="color:red">${escapeHtml(String(e))}</span>`; }
+}
+
+async function pdRecomputeLevels() {
+  const dm = _pdDomain();
+  const out = document.getElementById('pd-grp-move-msg');
+  if (!dm) { if (out) out.innerHTML = `<span style="color:red">${t('common.selectDomain')}</span>`; return; }
+  if (out) out.innerHTML = `<span class="muted">${t('pd.tag.releveling')}</span>`;
+  try {
+    const data = await _sxPost('/api/predefine/recompute-levels', { domain: dm });
+    if (data.error) { if (out) out.innerHTML = `<span style="color:red">${escapeHtml(data.error)}</span>`; return; }
+    if (out) out.innerHTML = `<span style="color:green">${t('pd.tag.relevelDone', { n: data.groups_releveled })}</span>`;
+  } catch (e) { if (out) out.innerHTML = `<span style="color:red">${escapeHtml(String(e))}</span>`; }
 }
 
 // --- Page 3 — Search workspace (recursive drill-down) --------------------

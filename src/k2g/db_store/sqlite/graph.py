@@ -1616,12 +1616,21 @@ class SqliteGraphStore:
         return [dict(zip(cols, r)) for r in cur.fetchall()]
 
     def merge_groups(self, alias_id: str, canonical_id: str) -> dict[str, Any]:
+        """Merge alias tag into canonical: re-point memberships, re-parent the
+        alias's children, soft-delete the alias. Levels are recomputed since
+        re-parenting can change subtree depth.
+
+        (groups.name is globally UNIQUE, so two tags can never share a child
+        name — no same-name child collision is possible.)
+        """
         if alias_id == canonical_id:
             raise ValueError("alias and canonical must differ")
         try:
             cur = self._conn.cursor()
             a = cur.execute("SELECT deprecated FROM groups WHERE id = ?", (alias_id,)).fetchone()
-            c = cur.execute("SELECT deprecated FROM groups WHERE id = ?", (canonical_id,)).fetchone()
+            c = cur.execute(
+                "SELECT deprecated, domain FROM groups WHERE id = ?", (canonical_id,)
+            ).fetchone()
             if a is None:
                 raise ValueError(f"alias group not found: {alias_id}")
             if c is None:
@@ -1645,6 +1654,8 @@ class SqliteGraphStore:
             )
             reparented = cur.rowcount or 0
             cur.execute("UPDATE groups SET deprecated = 1 WHERE id = ?", (alias_id,))
+            if c[1]:
+                self._recompute_levels_tx(cur, c[1])
             self._conn.commit()
         except Exception:
             self._conn.rollback()
@@ -1654,6 +1665,88 @@ class SqliteGraphStore:
             "memberships_moved": int(moved), "memberships_dedup": int(dedup),
             "children_reparented": int(reparented),
         }
+
+    def _descendant_ids(self, cur: Any, group_id: str) -> set[str]:
+        rows = cur.execute(
+            """
+            WITH RECURSIVE d(id) AS (
+                SELECT id FROM groups WHERE parent_id = ?
+                UNION ALL
+                SELECT g.id FROM groups g JOIN d ON g.parent_id = d.id
+            )
+            SELECT id FROM d
+            """,
+            (group_id,),
+        ).fetchall()
+        return {r[0] for r in rows}
+
+    def move_group(self, group_id: str, new_parent_id: str | None) -> dict[str, Any]:
+        """Re-parent a tag (and its whole subtree) under ``new_parent_id``.
+
+        ``new_parent_id=None`` moves it to the domain root. Rejects moves that
+        would create a cycle (under itself or a descendant). Recomputes levels.
+        """
+        cur = self._conn.cursor()
+        g = cur.execute("SELECT domain FROM groups WHERE id = ?", (group_id,)).fetchone()
+        if g is None:
+            raise ValueError(f"group not found: {group_id}")
+        domain = g[0]
+        new_parent_id = new_parent_id or None
+        if new_parent_id:
+            if new_parent_id == group_id:
+                raise ValueError("cannot move a tag under itself")
+            p = cur.execute(
+                "SELECT id FROM groups WHERE id = ?", (new_parent_id,)
+            ).fetchone()
+            if p is None:
+                raise ValueError(f"new parent not found: {new_parent_id}")
+            if new_parent_id in self._descendant_ids(cur, group_id):
+                raise ValueError("cannot move a tag under its own descendant")
+        try:
+            cur.execute(
+                "UPDATE groups SET parent_id = ? WHERE id = ?",
+                (new_parent_id, group_id),
+            )
+            self._recompute_levels_tx(cur, domain)
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
+        return {"group_id": group_id, "new_parent_id": new_parent_id, "domain": domain}
+
+    def _recompute_levels_tx(self, cur: Any, domain: str) -> int:
+        """Recompute ``groups.level`` = tree depth (root=0) for one domain."""
+        rows = cur.execute(
+            "SELECT id, parent_id FROM groups WHERE domain = ?", (domain,)
+        ).fetchall()
+        parent = {r[0]: (r[1] or None) for r in rows}
+        memo: dict[str, int] = {}
+
+        def depth(gid: str, seen: set[str]) -> int:
+            if gid in memo:
+                return memo[gid]
+            p = parent.get(gid)
+            if p is None or p not in parent or p in seen:
+                memo[gid] = 0          # root, cross-domain parent, or cycle
+                return 0
+            seen.add(gid)
+            memo[gid] = depth(p, seen) + 1
+            return memo[gid]
+
+        updates = [(depth(gid, set()), gid) for gid in parent]
+        cur.executemany("UPDATE groups SET level = ? WHERE id = ?", updates)
+        return len(updates)
+
+    def recompute_group_levels(self, domain: str) -> dict[str, Any]:
+        """Public maintenance entry: refresh ``level`` for an entire domain."""
+        try:
+            cur = self._conn.cursor()
+            n = self._recompute_levels_tx(cur, domain)
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
+        return {"domain": domain, "groups_releveled": int(n)}
 
     def list_event_ids_by_group(
         self, group_id_or_name: "str | list[str]",

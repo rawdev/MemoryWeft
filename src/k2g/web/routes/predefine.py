@@ -99,7 +99,7 @@ def entity_link(
 
 @router.get("/predefine/tag-merge-preview")
 def tag_merge_preview(
-    tag_id: str = Query(...),
+    tag_id: str = Query(..., description="alias tag id"),
     db: Any = Depends(get_db_dep),
 ) -> dict:
     """Read-only counts of what a merge of ``tag_id`` (as alias) would move.
@@ -132,8 +132,8 @@ def tag_merge(
 ) -> dict:
     """Merge alias tag into canonical. Body: ``{alias_id, canonical_id}``.
 
-    Re-points memberships + re-parents children to canonical, soft-deletes alias.
-    Internal: graph.merge_groups(...).
+    Re-points memberships + re-parents children to canonical, soft-deletes alias,
+    and recomputes levels. Internal: graph.merge_groups(...).
     """
     alias_id = (body.get("alias_id") or "").strip()
     canonical_id = (body.get("canonical_id") or "").strip()
@@ -146,6 +146,51 @@ def tag_merge(
     except Exception as exc:  # noqa: BLE001
         logger.error("tag-merge %s→%s failed: %s", alias_id, canonical_id, exc)
         return {"error": f"tag merge failed: {exc}"}
+    return sanitize(result)
+
+
+@router.post("/predefine/tag-move")
+def tag_move(
+    body: dict,
+    db: Any = Depends(get_db_dep),
+) -> dict:
+    """Re-parent a tag (and its subtree). Body: ``{group_id, new_parent_id?}``.
+
+    ``new_parent_id`` omitted/empty moves the tag to the domain root. Rejects
+    cycles (moving under itself or a descendant). Internal: graph.move_group(...).
+    """
+    group_id = (body.get("group_id") or "").strip()
+    new_parent_id = (body.get("new_parent_id") or "").strip() or None
+    if not group_id:
+        return {"error": "group_id is required"}
+    try:
+        result = db.graph.move_group(group_id, new_parent_id)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    except Exception as exc:  # noqa: BLE001
+        logger.error("tag-move %s→%s failed: %s", group_id, new_parent_id, exc)
+        return {"error": f"tag move failed: {exc}"}
+    return sanitize(result)
+
+
+@router.post("/predefine/recompute-levels")
+def recompute_levels(
+    body: dict,
+    db: Any = Depends(get_db_dep),
+) -> dict:
+    """Recompute ``groups.level`` (tree depth) for a domain. Body: ``{domain}``.
+
+    Maintenance: levels can go stale after merges/moves. Internal:
+    graph.recompute_group_levels(...).
+    """
+    domain = (body.get("domain") or "").strip()
+    if not domain:
+        return {"error": "domain is required"}
+    try:
+        result = db.graph.recompute_group_levels(domain)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("recompute-levels %s failed: %s", domain, exc)
+        return {"error": f"recompute levels failed: {exc}"}
     return sanitize(result)
 
 

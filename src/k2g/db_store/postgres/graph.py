@@ -1692,22 +1692,34 @@ class PostgresGraphStore(ReconnectingConnMixin):
             )
             return [dict(r) for r in cur.fetchall()]
 
+    @staticmethod
+    def _g(row: Any, idx: int, key: str) -> Any:
+        # psycopg2 may return dict-rows (RealDictCursor) or tuples.
+        return row[key] if isinstance(row, dict) else row[idx]
+
     def merge_groups(self, alias_id: str, canonical_id: str) -> dict[str, Any]:
+        """Merge alias tag into canonical: re-point memberships, re-parent the
+        alias's children, soft-delete the alias. Levels are recomputed since
+        re-parenting can change subtree depth.
+
+        (groups.name is globally UNIQUE, so two tags can never share a child
+        name — no same-name child collision is possible.)
+        """
         if alias_id == canonical_id:
             raise ValueError("alias and canonical must differ")
         try:
             with self._conn.cursor() as cur:
                 cur.execute("SELECT deprecated FROM groups WHERE id = %s", (alias_id,))
                 a = cur.fetchone()
-                cur.execute("SELECT deprecated FROM groups WHERE id = %s", (canonical_id,))
+                cur.execute(
+                    "SELECT deprecated, domain FROM groups WHERE id = %s", (canonical_id,)
+                )
                 c = cur.fetchone()
                 if a is None:
                     raise ValueError(f"alias group not found: {alias_id}")
                 if c is None:
                     raise ValueError(f"canonical group not found: {canonical_id}")
-                # psycopg2 may return a dict-row (RealDictCursor) or tuple
-                c_dep = c["deprecated"] if isinstance(c, dict) else c[0]
-                if c_dep:
+                if self._g(c, 0, "deprecated"):
                     raise ValueError(f"canonical group is deprecated: {canonical_id}")
                 cur.execute(
                     "DELETE FROM event_member_of WHERE group_id = %s "
@@ -1726,6 +1738,9 @@ class PostgresGraphStore(ReconnectingConnMixin):
                 )
                 reparented = cur.rowcount or 0
                 cur.execute("UPDATE groups SET deprecated = TRUE WHERE id = %s", (alias_id,))
+                domain = self._g(c, 1, "domain")
+                if domain:
+                    self._recompute_levels_tx(cur, domain)
             self._conn.commit()
         except Exception:
             self._conn.rollback()
@@ -1735,6 +1750,90 @@ class PostgresGraphStore(ReconnectingConnMixin):
             "memberships_moved": int(moved), "memberships_dedup": int(dedup),
             "children_reparented": int(reparented),
         }
+
+    def _descendant_ids(self, cur: Any, group_id: str) -> set[str]:
+        cur.execute(
+            """
+            WITH RECURSIVE d(id) AS (
+                SELECT id FROM groups WHERE parent_id = %s
+                UNION ALL
+                SELECT g.id FROM groups g JOIN d ON g.parent_id = d.id
+            )
+            SELECT id FROM d
+            """,
+            (group_id,),
+        )
+        return {self._g(r, 0, "id") for r in cur.fetchall()}
+
+    def move_group(self, group_id: str, new_parent_id: str | None) -> dict[str, Any]:
+        """Re-parent a tag (and its whole subtree) under ``new_parent_id``.
+
+        ``new_parent_id=None`` moves it to the domain root. Rejects moves that
+        would create a cycle (under itself or a descendant). Recomputes levels.
+        """
+        new_parent_id = new_parent_id or None
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute("SELECT domain FROM groups WHERE id = %s", (group_id,))
+                g = cur.fetchone()
+                if g is None:
+                    raise ValueError(f"group not found: {group_id}")
+                domain = self._g(g, 0, "domain")
+                if new_parent_id:
+                    if new_parent_id == group_id:
+                        raise ValueError("cannot move a tag under itself")
+                    cur.execute("SELECT id FROM groups WHERE id = %s", (new_parent_id,))
+                    if cur.fetchone() is None:
+                        raise ValueError(f"new parent not found: {new_parent_id}")
+                    if new_parent_id in self._descendant_ids(cur, group_id):
+                        raise ValueError("cannot move a tag under its own descendant")
+                cur.execute(
+                    "UPDATE groups SET parent_id = %s WHERE id = %s",
+                    (new_parent_id, group_id),
+                )
+                self._recompute_levels_tx(cur, domain)
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
+        return {"group_id": group_id, "new_parent_id": new_parent_id, "domain": domain}
+
+    def _recompute_levels_tx(self, cur: Any, domain: str) -> int:
+        """Recompute ``groups.level`` = tree depth (root=0) for one domain."""
+        cur.execute("SELECT id, parent_id FROM groups WHERE domain = %s", (domain,))
+        parent = {
+            self._g(r, 0, "id"): (self._g(r, 1, "parent_id") or None)
+            for r in cur.fetchall()
+        }
+        memo: dict[str, int] = {}
+
+        def depth(gid: str, seen: set[str]) -> int:
+            if gid in memo:
+                return memo[gid]
+            p = parent.get(gid)
+            if p is None or p not in parent or p in seen:
+                memo[gid] = 0
+                return 0
+            seen.add(gid)
+            memo[gid] = depth(p, seen) + 1
+            return memo[gid]
+
+        for gid in parent:
+            cur.execute(
+                "UPDATE groups SET level = %s WHERE id = %s", (depth(gid, set()), gid)
+            )
+        return len(parent)
+
+    def recompute_group_levels(self, domain: str) -> dict[str, Any]:
+        """Public maintenance entry: refresh ``level`` for an entire domain."""
+        try:
+            with self._conn.cursor() as cur:
+                n = self._recompute_levels_tx(cur, domain)
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
+        return {"domain": domain, "groups_releveled": int(n)}
 
     def list_event_ids_by_group(
         self, group_id_or_name: "str | list[str]",
