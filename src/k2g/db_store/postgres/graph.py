@@ -189,7 +189,7 @@ class PostgresGraphStore(ReconnectingConnMixin):
         # In read-only MCP environments the schema setup can be skipped to
         # avoid ALTER lock contention against a Supabase pooler, which
         # caused first-call hangs (2026-05-12 incident).
-        # The build-time entrypoint (k2g-build-memory) ignores this flag
+        # The build-time entrypoint ignores this flag
         # and always runs the full setup.
         import os
         if os.environ.get("K2G_DB_SKIP_SCHEMA_SETUP", "").strip().lower() in ("1", "true", "yes"):

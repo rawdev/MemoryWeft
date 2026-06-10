@@ -25,7 +25,7 @@ def _coerce_pg_timestamp(v: Any) -> Any:
     Converts ``'YYYY-MM-DD HH:MM:SS.ffffff+00'`` to ``+00:00`` form.
     Already-datetime values or other formats are returned unchanged.
 
-    When the K2G build pipeline migrates PG → SQLite it inserts the raw
+    When data migrates PG → SQLite (e.g. export/import) it can insert the raw
     ``timestamptz::text`` output (``+00`` suffix) directly. Pydantic v2's
     datetime parser rejects the shortened ``+HH`` form (RFC3339/ISO requires
     ``+HH:MM``).

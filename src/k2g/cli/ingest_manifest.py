@@ -2,7 +2,7 @@
 
 When an AI (Claude, etc.) writes a ``[content, summary, entities]`` bundle
 as a JSON manifest, this CLI reads it and loads it into K2G MemoryWeft.
-Unlike the traditional ``k2g-build`` pipeline, **K2G does not re-run
+Unlike a server-side LLM build pipeline, **K2G does not re-run
 summarization or NER via an LLM** — the manifest's AI-produced output is
 trusted (``ner_method="caller_provided"``). Embedding (local BGE-M3), event
 creation, ``chunk_order`` chains, entity_connection, and atomic load all

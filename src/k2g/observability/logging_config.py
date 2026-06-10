@@ -1,6 +1,6 @@
 """JSON Lines logging + centralized dictConfig.
 
-Unifies 3 scattered setup sites (MCP / CLI / k2g_build.py) into a
+Unifies 3 scattered setup sites (MCP / CLI / build pipeline) into a
 single entry point: ``configure_logging(settings)``.  Existing 155+
 files using ``logging.getLogger(__name__)`` are unchanged -- only
 the root logger's handler / formatter is replaced.

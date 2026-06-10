@@ -16,7 +16,7 @@ Supported subcommands:
 Removed subcommands:
     query / generate-scene              — legacy adapter chain (deferred
                                           until adapters are ported)
-    ingest vcs                          — moved to scripts/k2g_build.py CLI
+    ingest vcs                          — moved to the build-pipeline CLI
 """
 
 from __future__ import annotations

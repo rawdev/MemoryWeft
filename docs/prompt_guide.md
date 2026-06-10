@@ -12,6 +12,7 @@ Adjust to taste.
 - [Why these heuristics](#why-these-heuristics)
 - [The `hint` and `reason` tags](#the-hint-and-reason-tags)
 - [Save discipline](#save-discipline)
+- [Bulk / document ingestion](#bulk--document-ingestion)
 - [Gotchas](#gotchas)
 
 ## The snippet
@@ -106,6 +107,33 @@ After the save, surface what was recorded:
 If the user flags a hallucination:
 `mweft_remember_edit(event_id=<from response>, remove_entities=["Bob"])`
 
+### Document ingestion (bulk write — files/folders)
+
+`mweft_remember` is one conversational save. To ingest a whole **file or
+folder** with summaries + entities you already produced, use **manifest
+ingestion** — zero MWeft-side LLM calls (you supply summary/NER; MWeft only
+embeds + links), landing in the same group/tag structure as `mw save`.
+
+- **Decide first.** Manifest = AI value-add (your summaries / semantic chunks
+  of a document). For one short note use `mweft_remember`. A manifest must
+  carry *your* summaries + entities — don't dump raw, unsummarized text into
+  it; chunk and summarize first.
+- **Author** a `*.manifest.json` (`"schema": "k2g.manifest.v1"`): split the
+  source on semantic boundaries; each chunk is one item —
+  `{content (≤50000), summary (≤500, the embed target), entities: [{name,type}]}`.
+  Append **incrementally** (a giant one-shot JSON gets cut by the output cap);
+  set `"complete": true` only when fully written.
+- **Run** it yourself via shell:
+  ```bash
+  k2g-ingest-manifest path/to/ingest.manifest.json --remove-after
+  ```
+  All-or-nothing (one bad item rejects the batch); re-running is dedup-safe.
+- **External documents** (corpus with a different author): switch to *curated*
+  mode — `--working-folder <docs-root> --tag <Label>` with a **user-confirmed**
+  tag (don't invent it). Keeps doc provenance out of conversational memory.
+- Limits: `items ≤ 2000`, `Σcontent ≤ ~5MB` — over that, split into per-batch
+  manifests chained via `prev_event_id`.
+
 ### Recommend a save when
 
 Append a single line at the end of a response when:
@@ -185,6 +213,25 @@ Two failure modes to avoid:
    save on explicit user signal (`mw save`). Suggest a save when a
    conversation has *produced something durable* — a decision, a root
    cause, an agreement — not after each task completion.
+
+## Bulk / document ingestion
+
+`mweft_remember` saves one conversational unit. The second write path is
+**manifest ingestion** — for loading a whole file or folder where the LLM has
+already produced the summaries and entities. MWeft makes no LLM calls during
+the load: it trusts the manifest's summary/NER and only computes embeddings,
+so a large document lands in the same group/tag structure as `mw save` at a
+fraction of the cost.
+
+Reach for it when you've split a document into semantic chunks and want each
+chunk stored with its own summary + entities. For a single short note, stay
+with `mweft_remember`. (This distribution has no server-side LLM, so the
+summaries and entities come from you — there is no raw-corpus auto-summarize
+path here.) The contract is just two things — the `*.manifest.json` schema and
+the `k2g-ingest-manifest` CLI — so it works from any agent that can write a
+file and run a shell. The full reference (schema fields, `--incremental` /
+curated `--tag` flags, guards) ships as `manifest_ingestion_guide.md` with the
+Manager.
 
 ## Gotchas
 

@@ -27,8 +27,8 @@ is defined in the guide.
 1. **Load the guide**: read `.claude/skills/manifest-ingestion/GUIDE.md`
    (the contract: schema §3, CLI §4, guards §5, workflow §6).
 2. **Judge fit** (guide §1): manifest is for *AI-summarized* ingestion. A single
-   short note → use the `mweft_remember` MCP tool instead. Raw bulk corpus →
-   `k2g-build`.
+   short note → use the `mweft_remember` MCP tool instead. Raw, unsummarized
+   text → chunk and summarize it into a manifest first.
 2.5. **Pre-check on re-ingest** (saves LLM cost): if re-ingesting an existing
    source file, run `k2g-manifest-check --source <path> --file-path <id>` BEFORE
    chunking. If it prints `unchanged` (exit 3), stop — the source is already

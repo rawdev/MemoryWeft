@@ -3,8 +3,8 @@
 EventBrancher has been rewritten on top of DbStore + LLM
 (`src/k2g/adapters/event_brancher.py`).  This endpoint handles
 **text generation only** — re-ingesting generated events back into
-the graph is recommended via the Producer/Loader path
-(scripts/k2g_build.py); the legacy IngestionPipeline is not used.
+the graph is recommended via the Producer/Loader path; the
+legacy IngestionPipeline is not used.
 """
 
 from __future__ import annotations

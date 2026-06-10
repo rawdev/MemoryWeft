@@ -8,8 +8,8 @@ Read (BP-29 rev):
 - :func:`k2g.mcp.tools.context_detail_tool` — one CG's narrative + hierarchy + events
 
 Write path: no MCP write tool. BP-29 rev uses AI-proposed md curation with
-user consent → :mod:`scripts.ingest_text_batch`. The Stop hook pipeline
-(:mod:`k2g.hooks.cache_turn`, :mod:`k2g.cli.build_memory`) is deprecated.
+user consent → :mod:`scripts.ingest_text_batch`. The legacy Stop-hook
+turn-cache build path is deprecated.
 The stdio server is started via ``python -m k2g.mcp`` (see ``__main__.py``).
 """
 

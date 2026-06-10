@@ -54,9 +54,11 @@ def backup_file_once(path: Path) -> str | None:
 # BP-95 layered separation (design evt_c7aff47): the manifest-ingestion
 # procedure ships as an AI-agnostic canonical guide + a Claude Skill wrapper.
 # Claude Code keeps the Skill reference; every other client points at the
-# neutral guide we drop next to project.yaml (and ``--help`` as a fallback).
+# neutral guide we drop — at ``<project>/.mweft/`` for project clients, or
+# ``~/.mweft/`` for global clients (whose prompt also lives in a home file).
 _MANIFEST_SKILL_REF = "`.claude/skills/manifest-ingestion/GUIDE.md` (Skill: `manifest-ingestion`)"
 _MANIFEST_NEUTRAL_REF = "`.mweft/manifest-ingestion-guide.md` (or `k2g-ingest-manifest --help`)"
+_MANIFEST_NEUTRAL_REF_GLOBAL = "`~/.mweft/manifest-ingestion-guide.md` (or `k2g-ingest-manifest --help`)"
 
 
 def _template_dir() -> Path:
@@ -74,19 +76,29 @@ def _load_manifest_guide() -> str:
 
 
 def _adapt_template(slug: str, body: str) -> str:
-    """Claude keeps the Skill reference; other clients get the neutral guide."""
+    """Claude keeps the Skill reference; other clients get the neutral guide.
+
+    Project clients reference a repo-relative ``.mweft/…`` path; global clients
+    (no project dir) reference the home copy ``~/.mweft/…``."""
     if slug == "claude_code":
         return body
-    return body.replace(_MANIFEST_SKILL_REF, _MANIFEST_NEUTRAL_REF)
+    ref = _MANIFEST_NEUTRAL_REF_GLOBAL if slug.endswith("_global") else _MANIFEST_NEUTRAL_REF
+    return body.replace(_MANIFEST_SKILL_REF, ref)
 
 
 def _manifest_guide_target(slug: str, project_dir: str | Path | None) -> Path | None:
-    """Where the neutral guide is dropped for non-Claude project clients.
+    """Where the neutral guide is dropped for non-Claude clients.
 
-    Claude uses the Skill bundle (:func:`_claude_skill_targets`); global-scope
-    clients have no project dir (the prompt then falls back to
-    ``k2g-ingest-manifest --help``)."""
-    if slug == "claude_code" or not project_dir:
+    Claude uses the Skill bundle (:func:`_claude_skill_targets`). Project clients
+    get ``<project>/.mweft/…``; global-scope clients have no project dir but still
+    install a home prompt file (``~/.codex/AGENTS.md`` etc.), so the guide goes to
+    the home copy ``~/.mweft/…`` that the global prompt references (instead of the
+    old ``--help``-only fallback)."""
+    if slug == "claude_code":
+        return None
+    if slug.endswith("_global"):
+        return Path.home() / ".mweft" / "manifest-ingestion-guide.md"
+    if not project_dir:
         return None
     return Path(project_dir) / ".mweft" / "manifest-ingestion-guide.md"
 

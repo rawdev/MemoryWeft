@@ -15,9 +15,9 @@ Manifest ingestion is strictly for **AI value-added ingestion**:
   context; split a long document into semantic units and store each chunk with
   an AI summary + entities. (Summary/NER *already performed by the AI*.)
 - ❌ **Not a manifest → single save**: for a single short item, use the
-  `mweft_remember` MCP tool. To build a *raw corpus verbatim in bulk*, use
-  `k2g-build` (K2G performs summary/NER via its own LLM). Do not dump raw text
-  through a manifest.
+  `mweft_remember` MCP tool. A manifest must carry **your own AI summaries +
+  entities** — do not dump raw, unsummarized text through it (chunk and
+  summarize first).
 
 Key point: a manifest makes **zero K2G-side LLM calls**. Summaries/entities are
 trusted as-is from the AI output the manifest carries. Only the (local)

@@ -83,8 +83,8 @@ def set_log_context(
     """Set context at process scope without ``with`` (one-shot CLI entry).
 
     When the process exits, contextvars are GC'd so no reset is
-    needed.  Intended for long ``main()`` functions (e.g.
-    ``scripts/k2g_build.py``) where deeply indented ``with`` blocks
+    needed.  Intended for long ``main()`` functions where deeply
+    indented ``with`` blocks
     are inconvenient.  Merges with parent context -- only explicitly
     specified keys are overridden.
     """

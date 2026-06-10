@@ -12,8 +12,7 @@ Init modes:
 File log: ``{DATA_DIR}/mcp_debug.log`` (DEBUG level when DEBUG_MODE=true).
 
 The MCP server is read-only: content/object store and ingestion
-pipeline are not built here (injected off-band via
-``k2g-build-memory``).
+pipeline are not built here (injected off-band by a separate build pipeline).
 """
 
 from __future__ import annotations
