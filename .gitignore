@@ -39,3 +39,7 @@ models/
 
 # Private source asset — never publish to the OSS repo
 icon_src.png
+
+# Local AI-client config + mweft backups (created in-repo by the launcher/installer)
+CLAUDE.md
+.mcp.json.mweft-bak
