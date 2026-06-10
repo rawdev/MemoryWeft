@@ -4,29 +4,52 @@
 
 > Local-first graph memory for MCP — where **events** *are* the edges.
 
-MWeft is an embedded knowledge-graph memory layer that ships as a single
-stdio MCP server backed by one SQLite file. No server to provision, no
-remote API key required, no graph database to install — just a Python
-process and a file.
+MemoryWeft is an embedded knowledge-graph memory layer that implements the
+**Event-Centric Knowledge Graph (ECKG)** idea. It runs as a stdio MCP server
+backed by a single SQLite file, or Postgres + pgvector.
 
-It's designed for memory whose value lives in **relational nuance**, not
-discrete facts.
+What it records is **entities** (objects) and **events** (descriptions of how
+objects relate). Entity-to-entity graph relations are defined fluidly *from the
+events*; event-to-event graph relations are defined fluidly from the nature of
+the entities that participate in them. Nothing is fixed at write time.
+
+Search works from many angles — keyword, RAG (semantic), and graph relations —
+and returns rich results. Memory is written two ways: via MCP functions, or by
+bulk-ingesting large text documents.
+
+## Architecture in 30 seconds
+
+Three node kinds — **entities**, **events**, **tags** — and a small set of
+edges:
+
+- `participated_in` (entity ↔ event)
+- `event_sequential_next` (event → event — document order / threads)
+- `event_member_of` (event → tag)
+- `entity_connection` (entity ↔ entity — co-occurrence count)
+- `event_jaccard_connected` (event ↔ event — shared entity/tag footprint)
+
+Both entities and events carry vector embeddings (BGE-M3 by default, embedded
+in process). Search returns hits **with a connection-map hint** — pointing the
+LLM at adjacent events, shared entities, co-occurrence neighbors, and
+semantically similar events, to guide its next move.
+
+On top of the raw graph, MWeft runs **Leiden community detection** over both
+the entity and event graphs to surface emergent clusters automatically. The
+`mweft_auto_tag_*` and `mweft_community_*` tools let the LLM summarize the
+cluster structure and drill into a specific community's members.
 
 ## What makes it different
 
-Most graph memory systems (Graphiti, mem0, …) ingest episodes and
-**extract typed entity-entity relations** from them
+Most graph-memory systems extract **typed entity-entity relations**
 (`A ─[KNOWS]─ B`, `A ─[WORKS_AT]─ C`). That extraction commits the model's
-interpretation at write time, quantizes relational nuance into a discrete
-label, and adds an extra hallucination surface.
+interpretation at write time.
 
-**MWeft takes the opposite stance: the event itself is the edge.** Two
-entities are "related" if they co-participate in an event, and the
-relationship's content lives in the event's vector + summary. There is no
-typed-relation extraction step, no relation schema to maintain, no
-quantization at ingestion.
+**MemoryWeft doesn't pre-decide: the event itself is the edge.** Two entities
+are "related" when they co-participate in an event, and the relationship's
+content lives in that event's vector + summary. There is no typed-relation
+extraction step, no relation schema to maintain, no quantization at ingestion.
 
-| | MWeft | Graphiti / mem0 |
+| | MemoryWeft | Other systems |
 |---|---|---|
 | Relation model | event = edge (vector + summary) | typed extracted edges |
 | Nuance preservation | full (continuous embedding) | lossy (discrete label) |
@@ -35,48 +58,23 @@ quantization at ingestion.
 | "Is it still true?" | query-time synthesis | edge invalidation |
 | Sweet spot | narrative, design, evolving meaning | factual KB, time-changing facts |
 
-MWeft's model can *approximate* typed retrieval at query time (soft-typed
-semantic hops). The reverse — recovering nuance from already-labeled
-edges — isn't possible. That makes MWeft the right fit when relationships
-are textured rather than discrete: writing, design context, project
-history with rationale, anything where "why" matters as much as "what".
-
-## Architecture in 30 seconds
-
-Three node kinds — **entities**, **events**, **tags** — and a small set
-of edges:
-
-- `participated_in` (entity ↔ event)
-- `event_sequential_next` (event → event — document order / threads)
-- `event_member_of` (event → tag)
-- `entity_connection` (entity ↔ entity — co-occurrence count)
-- `event_jaccard_connected` (event ↔ event — shared entity/tag footprint)
-
-Both entities and events carry vector embeddings (BGE-M3 by default,
-embedded in process). Search returns hits **with a connection-map hint** —
-a structure pointing the LLM at adjacent events, shared entities,
-co-occurrence neighbors, and semantically similar events, all without
-forcing extra tool calls.
-
-On top of the raw graph, MWeft runs **Leiden community detection** over
-both the entity and event graphs to surface emergent clusters
-("auto-tags") with no manual labeling. The `mweft_auto_tag_*` and
-`mweft_community_*` tools let the LLM summarize the cluster structure and
-drill into a community's members.
-
-The whole graph lives in one SQLite file (`sqlite-vec` for the vector
-index). Postgres + pgvector is supported as an alternative backend.
+MemoryWeft's model can *approximate* typed retrieval at query time. That makes
+it the right fit when relationships are textured rather than discrete: writing,
+design context, project history with rationale — anything where "why" matters
+as much as "what".
 
 ## What's in this distribution
 
-The MCP surface exposes a focused set of read/store tools:
+The MCP surface exposes a focused set of read/store tools (plus document-ingest
+CLIs):
 
 | | |
 |---|---|
 | **Search / read** | `mweft_search`, `mweft_entity_lookup`, `mweft_get_event_content` |
 | **Graph traversal** | `mweft_neighbors`, `mweft_relations`, `mweft_temporal_flow` |
-| **Communities / auto-tags** | `mweft_auto_tag_summarize`, `mweft_auto_tag_list`, `mweft_auto_tag_members`, `mweft_auto_tag_detail`, `mweft_auto_tag_of`, `mweft_community_explore`, `mweft_community_residual` |
+| **Communities** | `mweft_auto_tag_summarize`, `mweft_auto_tag_list`, `mweft_auto_tag_members`, `mweft_auto_tag_detail`, `mweft_auto_tag_of`, `mweft_community_explore`, `mweft_community_residual` |
 | **Write** | `mweft_remember`, `mweft_remember_edit` |
+| **Document CLI** | `k2g-ingest-manifest`, `k2g-manifest-check` |
 | **Free SQL** | `mweft_sql_query`, `mweft_describe_schema`, `mweft_explain_query` |
 
 Hint surface (returned with every search):
@@ -89,19 +87,20 @@ Hint surface (returned with every search):
 
 ## Status
 
-**Pre-release.** The core memory model and search surface are stable.
+**Pre-release.** The core features are stable.
 
-Not in this distribution (yet):
-- The full K2G build pipeline (heavy LLM ingestion). MWeft accepts memory
-  via `mweft_remember`; large-scale build is a separate concern.
+Some conveniences are still missing — for example, hiding the Postgres DSN from
+the MCP configuration.
 
 ## Quickstart — portable app (no Python)
 
-The easiest way to run MWeft — no Python, no pip, no config files:
+The easiest way — no Python, no pip, no config files:
 
-1. Download `mweft-<your-os>-<version>.zip` (e.g. `mweft-windows-<version>.zip` /
-   `mweft-macos-<version>.zip`) from the
-   **[Releases](https://github.com/rawdev/MemoryWeft/releases/latest)** page.
+1. Download the `mweft-<platform>-<version>.zip` for your OS from the
+   **[Releases](https://github.com/rawdev/MemoryWeft/releases/latest)** page:
+   - **Windows** — `mweft-win-x64-<version>.zip`
+   - **macOS (Apple Silicon)** — `mweft-mac-arm64-<version>.zip`
+   - **macOS (Intel)** — `mweft-mac-x64-<version>.zip`
 2. Unzip it — it's extract-and-run; nothing is installed system-wide.
    - **macOS: do NOT unzip into `Downloads`, `Desktop`, or `Documents`.** Those
      folders are protected by macOS privacy (TCC), so your AI client (Claude,
@@ -115,18 +114,16 @@ The easiest way to run MWeft — no Python, no pip, no config files:
    - **Windows** — double-click **`start-mweft.bat`**
    - **macOS** — run **`start-mweft.command`** (first time: right-click → Open to clear Gatekeeper)
 4. The **Manager** window opens. Create a project, choose where your memory lives
-   (a local SQLite folder, or a Postgres DSN), then click **Install MCP** for your
-   AI client (Claude Desktop, Cursor, Claude Code, …).
+   (a local SQLite folder, or a Postgres DSN), enter a **domain name** (the
+   isolation key within the DB), and start. Then, in Settings, click
+   **Install MCP** for the AI client you use (Claude Desktop, Cursor, Claude
+   Code, …).
 5. **Restart that AI client.** Done — say `mw search …` / `mw save …`.
 
-The launcher bundles a CPU ONNX runtime + the BGE-M3 model, so the first run works
-fully offline with no API key. (The first run can be slow while antivirus scans the
-files — see "First run & antivirus" below.)
+The launcher bundles a CPU ONNX runtime + the BGE-M3 model. The first run can be
+slow while antivirus scans the files — see "First run & antivirus" below.
 
 ## Install via pip (developers)
-
-The recommended setup uses local **ONNX** embeddings — no API key, and no
-PyTorch at runtime:
 
 ```bash
 pip install -e .[embed-onnx]
@@ -137,8 +134,8 @@ BAAI/bge-m3 ./models/bge-m3-onnx`) and point `EMBEDDING_ONNX_PATH` at it.
 Prefer a zero-setup API key, or PyTorch-managed weights instead? See the
 embedding options in [install.md](docs/install.md#embedding--onnx-openai-or-pytorch).
 
-Then register the server with your MCP client — all configuration goes in
-the client's `env` block, no separate config file. Example for Claude Code
+Then register the server with your MCP client — all configuration goes in the
+client's `env` block, no separate config file. Example for Claude Code
 (`~/.claude.json` or project-level `.mcp.json`):
 
 ```json
@@ -166,7 +163,7 @@ domains, tags, entities, and search. Install the `manager` extra
 (`pip install -e .[manager]`) and see
 [install.md](docs/install.md#manager-desktop-app-mweft-app).
 
-For getting the LLM to use MWeft well (search heuristics, save triggers,
+For getting the LLM to use MemoryWeft well (search heuristics, save triggers,
 the connection-map hint), see [prompt_guide.md](docs/prompt_guide.md) — drop
 the snippet into your `CLAUDE.md` / `GEMINI.md` / `.cursorrules`.
 
@@ -184,10 +181,3 @@ the first cold access.
 ## License
 
 [Apache License 2.0](LICENSE).
-
----
-
-**ECKG context.** MWeft sits in the *event-centric knowledge graph* (ECKG)
-space that gained traction in 2024–2026. Where most ECKG work focuses on
-*extraction quality*, MWeft asks whether extraction is the right move at
-all when relations are textured.
