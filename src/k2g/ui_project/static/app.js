@@ -1891,33 +1891,38 @@ async function showIntroPanel() {
     </div>
 
     <div class="card">
-      <h3>${t('intro.mcp.title')}</h3>
-      <div style="font-size:13px; line-height:1.6;">${t('intro.mcp.body')}</div>
-    </div>
-
-    <div class="card">
-      <h3>${t('intro.av.title')}</h3>
-      <div style="font-size:13px; line-height:1.6;">${t('intro.av.body')}</div>
-    </div>
-
-    <div class="card">
-      <h3>${t('intro.db.title')}</h3>
-      <div style="font-size:13px; line-height:1.6;">${t('intro.db.body')}</div>
-    </div>
-
-    <div class="card">
-      <h3>${t('intro.pg.title')}</h3>
-      <div style="font-size:13px; line-height:1.6;">${t('intro.pg.body')}</div>
-    </div>
-
-    <div class="card">
-      <h3>${t('intro.org.title')}</h3>
-      <div style="font-size:13px; line-height:1.6;">${t('intro.org.body')}</div>
+      <h3>${t('intro.project.title')}</h3>
+      <div style="font-size:13px; line-height:1.6;">${t('intro.project.body')}</div>
     </div>
 
     <div class="card">
       <h3>${t('intro.must.title')}</h3>
       <div style="font-size:13px; line-height:1.6;">${t('intro.must.body')}</div>
+    </div>
+
+    <div class="card">
+      <h3>${t('intro.mcp.title')}</h3>
+      <div style="font-size:13px; line-height:1.6;">${t('intro.mcp.body')}</div>
+    </div>
+
+    <div class="card">
+      <h3>${t('intro.manager.title')}</h3>
+      <div style="font-size:13px; line-height:1.6;">${t('intro.manager.body')}</div>
+    </div>
+
+    <div class="card">
+      <h3>${t('intro.tips.title')}</h3>
+      <div style="font-size:13px; line-height:1.6;">${t('intro.tips.body')}</div>
+    </div>
+
+    <div class="card">
+      <h3>${t('intro.remember.title')}</h3>
+      <div style="font-size:13px; line-height:1.6;">${t('intro.remember.body')}</div>
+    </div>
+
+    <div class="card">
+      <h3>${t('intro.av.title')}</h3>
+      <div style="font-size:13px; line-height:1.6;">${t('intro.av.body')}</div>
     </div>
 
     <div id="intro-status" class="muted" style="margin-top:10px;">${t('intro.status.checking')}</div>
