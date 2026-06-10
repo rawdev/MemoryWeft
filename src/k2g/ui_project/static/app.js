@@ -2017,9 +2017,12 @@ const _PD = {
   ents: [],               // [{id, name, type, event_count}]
   entSort: 'infl-desc',   // 'name-asc' | 'name-desc' | 'infl-asc' | 'infl-desc'
   entFilter: '',
-  groups: [],             // [{id, name, parent_id, deprecated, path}]
+  groups: [],             // [{id, name, parent_id, deprecated, path, tag_type}]
   grpFilter: '',
   grpCollapsed: new Set(),
+  // Tag-type filter checkboxes (provenance buckets). build = legacy k2g_build
+  // path tree, hidden by default; the rest are shown.
+  grpTypes: { forced: true, autotag: true, container: true, build: false, unknown: true },
   grpMergeAlias: null,      // {id, name, path} | null
   grpMergeCanonical: null,  // {id, name, path} | null
 };
@@ -2082,6 +2085,13 @@ function renderTagEdit() {
       <div style="padding:6px 10px; border-bottom:1px solid #f0f0f0;">
         <input type="text" id="pd-grp-filter" placeholder="${t('pd.tag.filterPh')}" style="width:100%"
                oninput="_pdGrpFilter(this.value)">
+        <div style="margin-top:6px; display:flex; gap:12px; flex-wrap:wrap; font-size:12px; align-items:center;">
+          <span class="muted">${t('pd.tag.typeFilter')}</span>
+          ${['forced', 'autotag', 'container', 'build', 'unknown'].map(tp =>
+            `<label style="display:inline-flex; align-items:center; gap:3px; cursor:pointer;">
+              <input type="checkbox" data-tagtype="${tp}" ${_PD.grpTypes[tp] ? 'checked' : ''}
+                     onchange="_pdGrpTypeToggle('${tp}', this.checked)">${t('pd.tag.type.' + tp)}</label>`).join('')}
+        </div>
       </div>
       <div class="sx-list" id="pd-grp-tree" style="max-height:60vh;"></div>
     </div>`;
@@ -2317,6 +2327,11 @@ function _pdGrpFilter(v) {
   _pdGrpRender();
 }
 
+function _pdGrpTypeToggle(tp, on) {
+  _PD.grpTypes[tp] = !!on;
+  _pdGrpRender();
+}
+
 function _pdGrpToggle(id) {
   if (_PD.grpCollapsed.has(id)) _PD.grpCollapsed.delete(id);
   else _PD.grpCollapsed.add(id);
@@ -2353,11 +2368,30 @@ function _pdGrpRender() {
     }
   }
 
+  // Tag-type filter: a node passes if its own type checkbox is on, OR any
+  // descendant passes (so the path to a visible child stays clickable, same
+  // policy as search). Ancestors are pulled in even if their own type is off.
+  const typeOn = (g) => _PD.grpTypes[g.tag_type || 'unknown'] !== false;
+  const allTypesOn = Object.values(_PD.grpTypes).every(Boolean);
+  let typeVisible = null;
+  if (!allTypesOn) {
+    typeVisible = new Set();
+    gs.forEach(g => { if (typeOn(g)) typeVisible.add(g.id); });
+    const parentOf = {};
+    gs.forEach(g => { parentOf[g.id] = g.parent_id || null; });
+    [...typeVisible].forEach(id => {
+      let p = parentOf[id];
+      while (p) { typeVisible.add(p); p = parentOf[p]; }
+    });
+  }
+  const passes = (g) =>
+    (!visible || visible.has(g.id)) && (!typeVisible || typeVisible.has(g.id));
+
   const lines = [];
   const walk = (pid, depth) => {
     (byParent[pid] || []).forEach(g => {
-      if (visible && !visible.has(g.id)) return;
-      const children = byParent[g.id] || [];
+      if (!passes(g)) return;
+      const children = (byParent[g.id] || []).filter(passes);
       const hasChildren = children.length > 0;
       // When filtering, force-expand matches so user can see them.
       const collapsed = !q && hasChildren && _PD.grpCollapsed.has(g.id);
@@ -2370,7 +2404,7 @@ function _pdGrpRender() {
     });
   };
   walk('__root__', 0);
-  tree.innerHTML = lines.join('') || `<div class="sx-empty">${q ? t('pd.tag.filterEmpty') : t('pd.tag.empty')}</div>`;
+  tree.innerHTML = lines.join('') || `<div class="sx-empty">${(q || typeVisible) ? t('pd.tag.filterEmpty') : t('pd.tag.empty')}</div>`;
 }
 
 // --- Combobox (Alias / Canonical) --------------------------------------

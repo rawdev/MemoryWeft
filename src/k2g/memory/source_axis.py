@@ -115,6 +115,29 @@ def canonical_axis(source: str | None) -> str:
     return resolve_axis(source).axis
 
 
+# --- UI display buckets ------------------------------------------------------
+# The Manager tag editor exposes the tag provenance as filter checkboxes. There
+# is one bucket per role (1:1), so ``working_folder`` (container) stays distinct
+# from ``autotag`` even though its canonical *axis* is "autotag". Order is the
+# checkbox order: most authoritative first.
+DISPLAY_TYPES: tuple[str, ...] = ("forced", "autotag", "container", "build", "unknown")
+
+_ROLE_TO_DISPLAY: dict[str, str] = {
+    ROLE_DISCOVERY: "forced",     # human/system-assigned (mweft_save_tag)
+    ROLE_QC: "autotag",           # LLM category / batch remember
+    ROLE_CONTAINER: "container",  # save-root marker (working_folder, non-topical)
+    ROLE_BASELINE: "build",       # ingestion structure (legacy k2g_build path tree)
+    ROLE_UNKNOWN: "unknown",      # NULL / unregistered provenance
+}
+
+
+def display_type(source: str | None) -> str:
+    """Collapse a ``groups.source`` value to one of ``DISPLAY_TYPES``.
+
+    Role-based so each of the five roles maps to exactly one UI tag type."""
+    return _ROLE_TO_DISPLAY.get(role_of(source), "unknown")
+
+
 __all__ = [
     "ROLE_DISCOVERY",
     "ROLE_QC",
@@ -123,8 +146,10 @@ __all__ = [
     "ROLE_UNKNOWN",
     "AxisProfile",
     "SOURCE_AXIS",
+    "DISPLAY_TYPES",
     "resolve_axis",
     "is_discoverable",
     "role_of",
     "canonical_axis",
+    "display_type",
 ]

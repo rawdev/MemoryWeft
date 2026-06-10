@@ -154,9 +154,19 @@ def list_tags(
     domain: str = Query(..., description="domain name"),
     stores: dict[str, Any] = Depends(get_stores_dep),
 ) -> dict:
-    """List the tag tree (internal: groups table)."""
+    """List the tag tree (internal: groups table).
+
+    Each tag carries a ``tag_type`` (provenance bucket: forced/autotag/
+    container/build/unknown) derived from ``groups.source`` so the Manager
+    tag editor can filter by type. See ``memory.source_axis.display_type``.
+    """
+    from k2g.memory.source_axis import display_type
+
     graph = stores["graph"]
     tags = graph.list_groups(domain=domain)
+    for tg in tags:
+        if isinstance(tg, dict):
+            tg["tag_type"] = display_type(tg.get("source"))
     return sanitize({"tags": tags})
 
 
