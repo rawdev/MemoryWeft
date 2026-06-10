@@ -2,40 +2,54 @@
 
 **English** | [한국어](README.KR.md)
 
-> Local-first graph memory for MCP — where **events** *are* the edges.
+MemoryWeft is a knowledge-graph memory that implements the **Event-Centric
+Knowledge Graph (ECKG)** idea.
 
-MemoryWeft is an embedded knowledge-graph memory layer that implements the
-**Event-Centric Knowledge Graph (ECKG)** idea. It runs as a stdio MCP server
-backed by a single SQLite file, or Postgres + pgvector.
+It runs as a stdio MCP server backed by a single SQLite file, or Postgres +
+pgvector.
 
-What it records is **entities** (objects) and **events** (descriptions of how
-objects relate). Entity-to-entity graph relations are defined fluidly *from the
-events*; event-to-event graph relations are defined fluidly from the nature of
-the entities that participate in them. Nothing is fixed at write time.
+MemoryWeft splits information into **entities** (objects) and **events**
+(descriptions of how objects relate), storing each separately, and computes and
+stores alongside them the values it needs for text, RAG, and graph relations.
 
-Search works from many angles — keyword, RAG (semantic), and graph relations —
-and returns rich results. Memory is written two ways: via MCP functions, or by
-bulk-ingesting large text documents.
+The resulting graph relations are defined and handled in the two ways below:
+
+1. Entity-to-entity relations are defined from the set of events the entities
+   co-participate in.
+
+2. Event-to-event relations are defined fluidly from their shared entities.
+
+MemoryWeft offers two ways to store — MCP functions and bulk document ingestion —
+both fully controllable by an AI through tool calls. Stored data can then be
+searched from many angles — keyword, RAG, and graph relations — and returns rich
+results.
 
 ## Architecture in 30 seconds
 
-Three node kinds — **entities**, **events**, **tags** — and a small set of
-edges:
+Node kinds
+- `entities`
+- `events`
+- `tags`
 
+Node relations
 - `participated_in` (entity ↔ event)
 - `event_sequential_next` (event → event — document order / threads)
 - `event_member_of` (event → tag)
 - `entity_connection` (entity ↔ entity — co-occurrence count)
 - `event_jaccard_connected` (event ↔ event — shared entity/tag footprint)
 
-Both entities and events carry vector embeddings (BGE-M3 by default, embedded
-in process). Search returns hits **with a connection-map hint** — pointing the
-LLM at adjacent events, shared entities, co-occurrence neighbors, and
-semantically similar events, to guide its next move.
+Both entities and events carry vector embeddings (BGE-M3 by default, embedded in
+process).
 
-On top of the raw graph, MWeft runs **Leiden community detection** over both
-the entity and event graphs to surface emergent clusters automatically. The
-`mweft_auto_tag_*` and `mweft_community_*` tools let the LLM summarize the
+Search returns not only the matched content but also a **connection-map hint**.
+
+The connection-map hint points the LLM at adjacent events, shared entities,
+co-occurrence neighbors, and semantically similar events, to guide its next move.
+
+MemoryWeft runs **Leiden community detection** over both the entity and event
+graphs to surface emergent clusters automatically.
+
+The `mweft_auto_tag_*` and `mweft_community_*` tools let the LLM summarize the
 cluster structure and drill into a specific community's members.
 
 ## What makes it different
@@ -47,7 +61,7 @@ interpretation at write time.
 **MemoryWeft doesn't pre-decide: the event itself is the edge.** Two entities
 are "related" when they co-participate in an event, and the relationship's
 content lives in that event's vector + summary. There is no typed-relation
-extraction step, no relation schema to maintain, no quantization at ingestion.
+extraction step, and no relation schema to maintain.
 
 | | MemoryWeft | Other systems |
 |---|---|---|
@@ -65,8 +79,7 @@ as much as "what".
 
 ## What's in this distribution
 
-The MCP surface exposes a focused set of read/store tools (plus document-ingest
-CLIs):
+The MCP surface exposes a focused set of read/store tools:
 
 | | |
 |---|---|
@@ -77,7 +90,7 @@ CLIs):
 | **Document CLI** | `k2g-ingest-manifest`, `k2g-manifest-check` |
 | **Free SQL** | `mweft_sql_query`, `mweft_describe_schema`, `mweft_explain_query` |
 
-Hint surface (returned with every search):
+Hints returned with search:
 
 - `connections.sequential` — adjacent document chunks
 - `connections.similar` — entity embedding neighbors
@@ -100,28 +113,23 @@ The easiest way — no Python, no pip, no config files:
    **[Releases](https://github.com/rawdev/MemoryWeft/releases/latest)** page:
    - **Windows** — `mweft-win-x64-<version>.zip`
    - **macOS (Apple Silicon)** — `mweft-mac-arm64-<version>.zip`
-   - **macOS (Intel)** — `mweft-mac-x64-<version>.zip`
+   - **macOS (Intel)** — `mweft-mac-x64-<version>.zip` (not currently supported.)
 2. Unzip it — it's extract-and-run; nothing is installed system-wide.
    - **macOS: do NOT unzip into `Downloads`, `Desktop`, or `Documents`.** Those
      folders are protected by macOS privacy (TCC), so your AI client (Claude,
-     etc.) is blocked from launching the bundled memory server out of them — the
-     MCP server then fails to start with `ModuleNotFoundError: No module named
-     'encodings'`. Put it in your **home folder** instead, e.g. `~/mweft`.
-     (Alternatively, grant the AI client Full Disk Access in System Settings →
-     Privacy & Security.) Keep your **memory/data folder** out of those
-     protected locations too.
+     etc.) is blocked from launching the bundled memory server out of them. Put
+     it in your **home folder** instead, e.g. `~/mweft`. (Alternatively, grant
+     the AI client Full Disk Access in System Settings → Privacy & Security.)
+     Keep your **memory/data folder** out of those protected locations too.
 3. Start the launcher:
    - **Windows** — double-click **`start-mweft.bat`**
    - **macOS** — run **`start-mweft.command`** (first time: right-click → Open to clear Gatekeeper)
-4. The **Manager** window opens. Create a project, choose where your memory lives
-   (a local SQLite folder, or a Postgres DSN), enter a **domain name** (the
-   isolation key within the DB), and start. Then, in Settings, click
-   **Install MCP** for the AI client you use (Claude Desktop, Cursor, Claude
-   Code, …).
-5. **Restart that AI client.** Done — say `mw search …` / `mw save …`.
-
-The launcher bundles a CPU ONNX runtime + the BGE-M3 model. The first run can be
-slow while antivirus scans the files — see "First run & antivirus" below.
+4. The **Manager** window opens.
+   - Create a project and choose where your memory lives (a local SQLite folder, or a Postgres DSN).
+   - Enter a **domain name** — the isolation key within the DB.
+   - You can delete and recreate projects anytime.
+   - After starting, in Settings, click **Install MCP** for the AI client you use (Claude Desktop, Cursor, Claude Code, …).
+5. **Restart that AI client.** Done — just say `mw search …` / `mw save …`.
 
 ## Install via pip (developers)
 
