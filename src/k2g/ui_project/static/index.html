@@ -18,6 +18,17 @@
             background: #111827; color: #fff; }
   .appbar .brand { font-weight: 700; font-size: 15px; letter-spacing: .2px; }
   .appbar .sp { flex: 1; }
+  /* Version + update nudge */
+  .appver { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; }
+  .appver .cur { color: #9ca3af; }
+  .appver .ok { color: #34d399; }
+  .appver a.up { display: inline-flex; align-items: center; gap: 4px;
+                 text-decoration: none; font-weight: 600; color: #fff;
+                 background: #d97706; border: 1px solid #f59e0b;
+                 padding: 2px 8px; border-radius: 999px; line-height: 1.4; }
+  .appver a.up:hover { background: #b45309; }
+  .appver a.rel { color: #9ca3af; text-decoration: none; }
+  .appver a.rel:hover { color: #cbd5e1; text-decoration: underline; }
   .appbar label { font-size: 12px; color: #cbd5e1; }
   .appbar select { padding: 5px 8px; border-radius: 6px; border: 1px solid #374151;
                    background: #1f2937; color: #fff; font-size: 13px; min-width: 160px; }
@@ -211,6 +222,7 @@
 <body>
 <header class="appbar">
   <span class="brand" data-i18n="appbar.brand">MemoryWeft Manager</span>
+  <span id="app-version" class="appver"></span>
   <span class="sp"></span>
   <span id="project-badge" data-i18n="appbar.projectChecking" style="font-size:13px; color:#cbd5e1;">Checking project…</span>
   <select id="lang-select" aria-label="Language" onchange="applyLanguage(this.value)" style="margin-left:12px;">

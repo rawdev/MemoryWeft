@@ -168,6 +168,7 @@ async function applyLanguage(code, opts) {
   document.documentElement.lang = code;
   applyStaticI18n();
   renderLangSelect();
+  _renderAppVersion(_APP_VER);   // appbar version labels follow the language
   if (rerender) {
     const active = document.querySelector('nav.tabs button.on');
     showTab(active ? active.dataset.tab : 'intro');
@@ -225,6 +226,40 @@ async function loadCurrentProject() {
     _CURRENT_PROJECT = null;
     if (badge) badge.innerHTML = `<span style="color:#f87171">${t('appbar.projectLoadFail')}</span>`;
   }
+}
+
+// Appbar version + update nudge. Cached so applyLanguage() can re-render the
+// labels without re-hitting the (best-effort, network) endpoint.
+let _APP_VER = null;
+
+function _renderAppVersion(data) {
+  const el = document.getElementById('app-version');
+  if (!el || !data) return;
+  const cur = escapeHtml(data.current || '?');
+  const relUrl = data.release_url || '#';
+  let html = `<span class="cur" title="${t('appbar.installedVersion')}">v${cur}</span>`;
+  if (data.update_available && data.latest) {
+    const latest = escapeHtml(data.latest);
+    html += ` <a class="up" href="${relUrl}" target="_blank" rel="noopener"`
+      + ` title="${t('appbar.updateTitle', { current: cur, latest: latest })}">`
+      + `↑ ${t('appbar.updateTo', { v: latest })}</a>`;
+  } else if (data.checked && data.latest) {
+    html += ` <span class="ok" title="${t('appbar.latestIs', { v: escapeHtml(data.latest) })}">✓ ${t('appbar.upToDate')}</span>`;
+  } else {
+    // Offline / rate-limited — stay quiet but still offer the releases link.
+    html += ` <a class="rel" href="${relUrl}" target="_blank" rel="noopener">${t('appbar.releases')}</a>`;
+  }
+  el.innerHTML = html;
+}
+
+async function loadAppVersion() {
+  try {
+    const r = await fetch('/api/app/version');
+    _APP_VER = await r.json();
+  } catch (e) {
+    _APP_VER = { current: '?', checked: false, release_url: 'https://github.com/rawdev/MemoryWeft/releases/latest' };
+  }
+  _renderAppVersion(_APP_VER);
 }
 
 /** Build a small inline "Domain:" selector for pages that need it.
@@ -4860,4 +4895,5 @@ window.addEventListener('DOMContentLoaded', async () => {
   await loadDomains();
   showTab('intro');
   maybeShowOnboarding();   // first-run: explain project/domain/group/tags, then warm up
+  loadAppVersion();        // appbar version + update nudge (best-effort, non-blocking)
 });

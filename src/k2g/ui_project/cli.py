@@ -347,9 +347,9 @@ def _build_app(project_dir: Path, *, hub_info: HubInfo | None = None,
     from k2g.web.deps import shutdown, startup
     from k2g.ui_project.internal_routes import router as internal_router
     from k2g.web.routes import (
-        archive, browse, community, control, entity_admin, event, fs_browser,
-        generate, installer, persona, predefine, project_init, search,
-        search_explorer, tag, train,
+        app_meta, archive, browse, community, control, entity_admin, event,
+        fs_browser, generate, installer, persona, predefine, project_init,
+        search, search_explorer, tag, train,
     )
     # Plan Studio is excluded from the OSS build (web.routes.plan dropped) —
     # import it optionally so the same code runs with or without it.
@@ -399,7 +399,7 @@ def _build_app(project_dir: Path, *, hub_info: HubInfo | None = None,
 
     app = FastAPI(
         title="MWeft Manager (per-project)",
-        version="0.1.0",
+        version=app_meta._current_version(),
         lifespan=lifespan,
         default_response_class=SafeJSONResponse,
     )
@@ -420,7 +420,7 @@ def _build_app(project_dir: Path, *, hub_info: HubInfo | None = None,
         tag.router, control.router, persona.router, train.router,
         community.router, entity_admin.router, predefine.router,
         search_explorer.router, archive.router, installer.router,
-        fs_browser.router, project_init.router,
+        fs_browser.router, project_init.router, app_meta.router,
     ]
     if plan is not None:
         routers.append(plan.router)
