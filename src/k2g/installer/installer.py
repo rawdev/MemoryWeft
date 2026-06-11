@@ -573,11 +573,25 @@ def _attach_prompt_result(
 
     Called after the JSON config has been (would-be) written so the UI
     sees both pieces in a single row.
+
+    Best-effort: the MCP config write is the actual install and has already
+    succeeded by the time we get here. The prompt/skill file drop is an add-on,
+    so *any* failure in it (a missing template, an unwritable home dir, a
+    surprise non-OSError) must be captured onto ``cr`` — never raised, or a
+    fully-applied install would surface to the UI as an HTTP 500 even though the
+    config was written. The error text lands in ``prompt_detail`` so the user
+    sees the real cause in the install row.
     """
-    if operation == "install":
-        pr = install_prompt(cr.slug, project_dir=project_dir, dry_run=dry_run)
-    else:
-        pr = uninstall_prompt(cr.slug, project_dir=project_dir)
+    try:
+        if operation == "install":
+            pr = install_prompt(cr.slug, project_dir=project_dir, dry_run=dry_run)
+        else:
+            pr = uninstall_prompt(cr.slug, project_dir=project_dir)
+    except Exception as exc:  # noqa: BLE001 — prompt step must never fail the install
+        logger.exception("installer: prompt step for %s failed", cr.slug)
+        cr.prompt_status = "failed"
+        cr.prompt_detail = f"prompt install error: {exc}"
+        return
     cr.prompt_path = pr.target_path
     cr.prompt_status = pr.status
     cr.prompt_detail = pr.detail
