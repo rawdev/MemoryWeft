@@ -3885,7 +3885,7 @@ async function showProjectSetupPanel(initialProjectDir, slug, targetEl) {
 
     <hr style="margin: 18px 0;">
 
-    <h3>${t('ps.s2')}</h3>
+    <h3 id="ps-install-section">${t('ps.s2')}</h3>
     <div class="muted" style="font-size: 12px; margin-bottom: 8px;">${t('ps.s2desc')}</div>
     <div style="display:flex; align-items:center; gap:10px; margin:8px 0 4px;">
       <h4 style="margin:0;">${t('ps.installedTitle')}</h4>
@@ -4881,10 +4881,32 @@ async function _onbStart() {
     await loadCurrentProject();
     await loadDomains();
     setDomain(domain);
-    showTab('summary');
+    // Right after first-run setup, drop the user on Settings → this project's
+    // AI (MCP) install section so they can connect an AI without hunting for it.
+    await _gotoProjectInstall(useSlug);
   } catch (e) {
     if (msg) msg.innerHTML = `<span style="color:#dc2626">${escapeHtml(String(e))}</span>`;
     reenable();
+  }
+}
+
+// After first-run onboarding completes: navigate to Settings, expand this
+// project's inline setup, and scroll to its AI (MCP) install section. The setup
+// panel renders after its own fetches, so poll briefly for the install heading.
+async function _gotoProjectInstall(slug) {
+  document.querySelectorAll('nav.tabs button').forEach(
+    (b) => b.classList.toggle('on', b.dataset.tab === 'settings'));
+  await showSettingsPanel();            // awaits _prRender → project rows exist
+  if (slug) {
+    _prExpandSlug(slug);
+  } else {
+    const first = document.querySelector('.pr-row');
+    if (first) _prToggleSetup(first);
+  }
+  for (let i = 0; i < 40; i++) {        // ~2s cap (40 × 50ms)
+    const sec = document.getElementById('ps-install-section');
+    if (sec) { sec.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+    await new Promise((r) => setTimeout(r, 50));
   }
 }
 
