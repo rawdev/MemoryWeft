@@ -79,6 +79,17 @@ k2g-ingest-manifest path/to/ingest.manifest.json --remove-after
 k2g-ingest-manifest path/to/ingest.manifest.json --incremental
 ```
 
+> **If `k2g-ingest-manifest` / `k2g-manifest-check` is "command not found"**:
+> these are console scripts inside the **mweft bundle's venv**, which the shell's
+> `PATH` may not include (portable bundles are not installed system-wide). Do
+> **not** give up or silently fall back to per-event `mweft_remember` — **ask the
+> user for the bundle location**, then call the script by its absolute path:
+> - Windows: `<bundle>\runtime\venv\Scripts\k2g-ingest-manifest.exe`
+> - macOS / Linux: `<bundle>/runtime/venv/bin/k2g-ingest-manifest`
+>
+> The MWeft MCP server you are connected to runs from that same venv, so its
+> directory is the reference for where these scripts live.
+
 - **Re-run safe (dedup)**: event_id is a deterministic hash of
   `(domain, working_folder, content)` — re-ingesting the same manifest yields
   zero duplicate events/chains.

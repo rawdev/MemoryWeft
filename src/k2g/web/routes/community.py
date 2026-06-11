@@ -651,24 +651,40 @@ def auto_tag_ego(
 def scope_tags(
     domain: str | None = Query(None),
     kind: str = Query("event"),
+    include_qc: bool = Query(False),
     db: Any = Depends(get_db_dep),
 ) -> dict:
-    """Source for the scoped-exploration dropdown — exposes only discovery-axis tags.
+    """Source for the scoped-exploration dropdown.
 
-    Excludes autotag/container/build (thousands of path groups) and returns only
-    human/system ground-truth tags (forced/user + legacy mweft_save_tag). The single
-    source of truth for inclusion is ``discoverable=True`` in
-    ``source_axis.SOURCE_AXIS``. Each tag's event_member_of member count is included
-    so empty boundaries can be filtered out.
+    Default: only discovery-axis tags — human/system ground-truth (forced/user +
+    legacy mweft_save_tag), i.e. ``discoverable=True`` in ``source_axis.SOURCE_AXIS``.
+
+    ``include_qc=True`` additionally exposes the QC axis (AI-assigned tags: autotag
+    / llm_build / legacy mweft_category). These are valid *scope* boundaries for
+    on-demand Leiden exploration even though they are not trusted as the *label*
+    axis (residual/anomaly stays forced/user only). ``container`` (working_folder)
+    and ``build`` (path-tree structural noise) are always excluded. Each tag carries
+    its ``role`` so the UI can mark AI tags distinctly; member counts let empty
+    boundaries be filtered out. The ``LIMIT 200 ORDER BY member_count DESC`` bounds
+    the larger QC set to the meaningful ones.
     """
     if kind not in _KINDS:
         return {"error": f"kind must be 'entity' or 'event', got {kind!r}"}
-    from k2g.memory.source_axis import SOURCE_AXIS, resolve_axis
+    from k2g.memory.source_axis import (
+        ROLE_DISCOVERY,
+        ROLE_QC,
+        SOURCE_AXIS,
+        resolve_axis,
+    )
 
     conn = getattr(db.graph, "_conn", None)
     if conn is None:
         return {"tags": [], "note": "graph store does not expose _conn"}
-    sources = [s for s, p in SOURCE_AXIS.items() if s is not None and p.discoverable]
+    allowed_roles = {ROLE_DISCOVERY} | ({ROLE_QC} if include_qc else set())
+    sources = [
+        s for s, p in SOURCE_AXIS.items()
+        if s is not None and p.role in allowed_roles
+    ]
     if not sources:
         return {"domain": domain, "kind": kind, "tags": []}
     try:
@@ -699,14 +715,16 @@ def scope_tags(
             gid, name, src, n = r["id"], r["name"], r["source"], r["n"]
         else:
             gid, name, src, n = r[0], r[1], r[2], r[3]
+        prof = resolve_axis(src)
         tags.append({
             "id": gid,
             "name": name,
             "source": src,
-            "axis": resolve_axis(src).axis,
+            "axis": prof.axis,
+            "role": prof.role,
             "member_count": int(n or 0),
         })
-    return sanitize({"domain": domain, "kind": kind, "tags": tags})
+    return sanitize({"domain": domain, "kind": kind, "include_qc": include_qc, "tags": tags})
 
 
 @router.get("/auto-tags/explore")

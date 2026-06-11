@@ -49,6 +49,12 @@ is defined in the guide.
    # re-ingesting a source file? add --source for robust change detection:
    k2g-ingest-manifest ./.k2g_tmp/ingest.manifest.json --source <orig> --remove-after
    ```
+   **"command not found"?** `k2g-ingest-manifest` / `k2g-manifest-check` live in
+   the mweft bundle's venv, which may not be on `PATH`. Do **not** fall back to
+   per-event `mweft_remember` — **ask the user for the bundle location** and call
+   the absolute path (Windows `<bundle>\runtime\venv\Scripts\k2g-ingest-manifest.exe`,
+   macOS/Linux `<bundle>/runtime/venv/bin/k2g-ingest-manifest`). The connected
+   MCP server runs from that same venv.
 5. **Verify** the `[manifest]` success line reporting `N/M events`; report counts to the user.
 
 ## Notes

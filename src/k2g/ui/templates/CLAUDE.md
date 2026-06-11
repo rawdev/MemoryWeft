@@ -11,6 +11,16 @@ retrieving important conversation content as long-term memory.
   attached*, use manifest ingestion — author a JSON manifest, then run
   `k2g-ingest-manifest <manifest>`. Procedure:
   `.claude/skills/manifest-ingestion/GUIDE.md` (Skill: `manifest-ingestion`).
+  - **Finding the CLI**: `k2g-ingest-manifest` / `k2g-manifest-check` are console
+    scripts in the **mweft bundle's venv** — the *same directory* as this MCP
+    server's `command` in your client config (e.g. `.mcp.json`). They may not be
+    on `PATH` (portable bundle, not a system install). If a bare call is
+    **"command not found"**, do **NOT** search with `find`/`pip` and do **NOT**
+    fall back to per-event `mweft_remember` — instead call the absolute path from
+    that venv (`…\runtime\venv\Scripts\k2g-ingest-manifest.exe` on Windows,
+    `…/runtime/venv/bin/k2g-ingest-manifest` on macOS/Linux). Derive it from the
+    MCP server `command` path in your config, or ask the user for the bundle
+    location.
 
 ### Search path
 

@@ -682,6 +682,9 @@ function _anScopedHtml() {
             <option value="">${t('an.scoped.tagLoading')}</option>
           </select>
         </label>
+        <label style="font-size:12px; display:inline-flex; align-items:center; gap:4px;" title="${t('an.scoped.includeQcHint')}">
+          <input type="checkbox" id="an-scope-include-qc" onchange="loadScopeTags()"> ${t('an.scoped.includeQc')}
+        </label>
         <label style="font-size:12px;">${t('an.scoped.kindLabel')}
           <select id="an-scope-kind" onchange="loadScopeTags()">
             <option value="event">event</option>
@@ -709,8 +712,10 @@ async function loadScopeTags() {
   const kind = (kindSel && kindSel.value) || 'event';
   sel.innerHTML = `<option value="">${t('an.scoped.tagLoading')}</option>`;
   try {
+    const includeQc = !!(document.getElementById('an-scope-include-qc') || {}).checked;
     const qs = `kind=${encodeURIComponent(kind)}`
-             + (d ? `&domain=${encodeURIComponent(d)}` : '');
+             + (d ? `&domain=${encodeURIComponent(d)}` : '')
+             + (includeQc ? '&include_qc=true' : '');
     const r = await fetch(`/api/auto-tags/scope-tags?${qs}`);
     const data = await r.json();
     if (data && data.error) {   // surface backend errors instead of a silent empty list
@@ -722,11 +727,12 @@ async function loadScopeTags() {
       sel.innerHTML = `<option value="">${t('an.scoped.tagNone')}</option>`;
       return;
     }
-    sel.innerHTML = tags.map(tg =>
-      `<option value="tag:${escapeHtml(tg.id)}">`
-      + `${escapeHtml(tg.name)} · ${tg.member_count}${t('search.unit.times') || ''} · ${escapeHtml(tg.axis || tg.source || '')}`
-      + `</option>`
-    ).join('');
+    sel.innerHTML = tags.map(tg => {
+      const mark = tg.role === 'qc' ? '🤖 ' : '';   // AI-assigned (autotag) tag
+      return `<option value="tag:${escapeHtml(tg.id)}">`
+        + `${mark}${escapeHtml(tg.name)} · ${tg.member_count}${t('search.unit.times') || ''} · ${escapeHtml(tg.axis || tg.source || '')}`
+        + `</option>`;
+    }).join('');
   } catch (e) {
     sel.innerHTML = `<option value="">${escapeHtml(String(e))}</option>`;
   }
@@ -4508,6 +4514,9 @@ function _renderInstallerRows(data, target) {
     const promptBody = c.prompt_copy_paste_body
       ? `<details style="margin-top:4px"><summary class="muted">Show prompt (paste manually)</summary><pre>${escapeHtml(c.prompt_copy_paste_body)}</pre></details>`
       : '';
+    const promptStale = c.prompt_status === 'already_present'
+      ? `<div style="font-size:11px; color:#b45309; margin-top:3px; line-height:1.5;">${t('ps.promptAlreadyPresent')}</div>`
+      : '';
     const promptRow = c.prompt_status
       ? `<div style="margin-top:4px; padding-left:8px; border-left:2px dotted #ccc;">
            <div class="muted" style="font-size:11px">
@@ -4515,6 +4524,7 @@ function _renderInstallerRows(data, target) {
              ${c.prompt_path ? '· ' + escapeHtml(c.prompt_path) : ''}
            </div>
            ${c.prompt_detail ? `<div class="muted" style="font-size:11px">${escapeHtml(c.prompt_detail)}</div>` : ''}
+           ${promptStale}
            ${promptBody}
          </div>`
       : '';
