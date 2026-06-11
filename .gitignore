@@ -40,6 +40,10 @@ models/
 # Private source asset — never publish to the OSS repo
 icon_src.png
 
-# Local AI-client config + mweft backups (created in-repo by the launcher/installer)
-CLAUDE.md
+# Local AI-client config + mweft backups (created in-repo by the launcher/installer).
+# Anchor to repo root: a bare `CLAUDE.md` also matches the SHIPPED prompt template
+# src/k2g/ui/templates/CLAUDE.md, which hatchling then drops from the wheel (the
+# build honors .gitignore even for force-tracked files) → the installer's
+# load_template() FileNotFoundErrors at runtime. Only ignore the root copy.
+/CLAUDE.md
 .mcp.json.mweft-bak
