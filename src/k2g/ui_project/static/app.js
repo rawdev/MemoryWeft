@@ -1979,6 +1979,11 @@ async function showIntroPanel() {
       <div style="font-size:13px; line-height:1.6;">${t('intro.av.body')}</div>
     </div>
 
+    <div class="card">
+      <h3>${t('intro.uninstall.title')}</h3>
+      <div style="font-size:13px; line-height:1.6;">${t('intro.uninstall.body')}</div>
+    </div>
+
     <div id="intro-status" class="muted" style="margin-top:10px;">${t('intro.status.checking')}</div>
     </div>`);
   try {

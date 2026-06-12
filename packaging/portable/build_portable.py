@@ -158,6 +158,12 @@ def main() -> None:
     shutil.copy2(HERE / "README.txt", stage / "README.txt")
     if (HERE / "readme_kr.txt").is_file():
         shutil.copy2(HERE / "readme_kr.txt", stage / "readme_kr.txt")
+    # Matching uninstaller for this platform (.bat on Windows, .command on macOS).
+    # Removes ~/.mweft + the bundle's data/ + runtime/; AI-config removal stays
+    # manual (in the Manager) for safety.
+    uninstaller = "uninstall-mweft.bat" if launcher.endswith(".bat") else "uninstall-mweft.command"
+    if (HERE / uninstaller).is_file():
+        shutil.copy2(HERE / uninstaller, stage / uninstaller)
     (stage / "VERSION").write_text(args.version + "\n", encoding="utf-8")
 
     # 2) uv binary
@@ -210,7 +216,7 @@ def main() -> None:
     # commits from Windows where git does not track the exec bit) and a 644
     # ``.command`` cannot be double-clicked ("cannot be opened"). Host-independent
     # so a Windows build runner still emits an executable mac launcher.
-    exec_in_zip = {"start-mweft.command", "uv"}
+    exec_in_zip = {"start-mweft.command", "uninstall-mweft.command", "uv"}
     with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED) as z:
         for f in sorted(stage.rglob("*")):
             if not f.is_file():

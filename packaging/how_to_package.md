@@ -83,6 +83,7 @@ python packaging/portable/build_portable.py --platform win-x64 --version 0.1.0 \
 ```
 mweft/
   start-mweft.bat / start-mweft.command   # launcher (double-click)
+  uninstall-mweft.bat / .command          # uninstaller (removes ~/.mweft + data/ + runtime/)
   bin/uv(.exe)                            # static uv binary
   models/bge-m3-onnx/                     # bundled ONNX model (if --model-dir)
   asset/mweft_sample/k2g_all_in_one.db    # first-run sample DB (if present at build)

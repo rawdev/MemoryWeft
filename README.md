@@ -150,6 +150,16 @@ The easiest way — no Python, no pip, no config files:
 
 *Once it's installed, just talk to your AI — `mw save …` to store, `mw search …` to recall.*
 
+## Uninstall
+
+Remove MemoryWeft in this order:
+
+1. **Uninstall from your AIs** — in the Manager's **Settings** tab, click **Remove** for each connected AI client, then **restart** any global AIs (Claude Desktop, etc.). Do this first so the `mweft` entry is cleanly removed from each AI's config.
+2. **Delete the mweft folder** — delete the whole unzipped portable folder (runtime, model, and the `data/` memory). The `data/` folder holds your SQLite memory DB, so back it up first if you need it.
+3. **Delete `.mweft` in your home folder** — `%USERPROFILE%\.mweft` (Windows) / `~/.mweft` (macOS). It holds global config such as the project list (`mweft_manager.json`).
+
+The portable build ships an **`uninstall-mweft`** script (`.bat` / `.command`) that does steps 2 & 3 for you — step 1 (AI removal) stays manual in the Manager for safety. If you used **Postgres**, the memory DB lives on that server; delete it separately.
+
 ## Install via pip (developers)
 
 ```bash
