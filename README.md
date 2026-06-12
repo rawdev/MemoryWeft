@@ -24,6 +24,11 @@ both fully controllable by an AI through tool calls. Stored data can then be
 searched from many angles — keyword, RAG, and graph relations — and returns rich
 results.
 
+![MemoryWeft Manager — Domain Summary](asset/1.png)
+
+*The bundled **Manager** app shows a domain at a glance — entity / event /
+connection counts, Leiden communities, and the top hub entities.*
+
 ## Architecture in 30 seconds
 
 Node kinds
@@ -51,6 +56,11 @@ graphs to surface emergent clusters automatically.
 
 The `mweft_auto_tag_*` and `mweft_community_*` tools let the LLM summarize the
 cluster structure and drill into a specific community's members.
+
+![Manager — Analysis: Leiden community graph](asset/3.png)
+
+*The Manager's **Analysis** tab renders the Leiden entity / event graph; click a
+node to open its event detail.*
 
 ## What makes it different
 
@@ -129,7 +139,16 @@ The easiest way — no Python, no pip, no config files:
    - Enter a **domain name** — the isolation key within the DB.
    - You can delete and recreate projects anytime.
    - After starting, in Settings, click **Install MCP** for the AI client you use (Claude Desktop, Cursor, Claude Code, …).
+
+   ![Manager — Settings: Install MCP](asset/2.png)
+
+   *Settings → **Install MCP** registers the mweft server into your AI client (per-project or global).*
+
 5. **Restart that AI client.** Done — just say `mw search …` / `mw save …`.
+
+![Using MemoryWeft from an AI client](asset/4.png)
+
+*Once it's installed, just talk to your AI — `mw save …` to store, `mw search …` to recall.*
 
 ## Install via pip (developers)
 

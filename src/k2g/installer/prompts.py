@@ -26,31 +26,6 @@ logger = logging.getLogger(__name__)
 START_MARKER = "<!-- mweft:prompt:begin -->"
 END_MARKER = "<!-- mweft:prompt:end -->"
 
-# Suffix for the one-time pristine backup taken before we first modify a user
-# file (MCP config or prompt file). Lets the user revert an install.
-BACKUP_SUFFIX = ".mweft-bak"
-
-
-def backup_file_once(path: Path) -> str | None:
-    """Snapshot ``path`` → ``path<.mweft-bak>`` once, before we modify it.
-
-    No-op when the file does not exist (a brand-new file we create needs no
-    backup) or when a backup is already present (preserve the *pristine*,
-    pre-mweft copy across re-installs). Returns the backup path when one exists
-    for this file, else ``None`` — so callers can tell the user recovery is
-    possible. Never raises into the install path."""
-    if not path.is_file():
-        return None
-    bak = path.with_name(path.name + BACKUP_SUFFIX)
-    if not bak.exists():
-        try:
-            import shutil
-            shutil.copy2(path, bak)
-        except OSError as exc:
-            logger.warning("backup of %s failed: %s", path, exc)
-            return None
-    return str(bak)
-
 # BP-95 layered separation (design evt_c7aff47): the manifest-ingestion
 # procedure ships as an AI-agnostic canonical guide + a Claude Skill wrapper.
 # Claude Code keeps the Skill reference; every other client points at the
@@ -135,7 +110,6 @@ class PromptResult:
                                      # removed | not_present | unsupported | failed
     detail: str = ""
     copy_paste_body: str | None = None
-    backup_path: str | None = None   # pristine backup of the prompt file, if taken
 
 
 def _claude_code_path(project_dir: str | Path | None) -> Path | None:
@@ -280,10 +254,6 @@ def install_prompt(
             copy_paste_body=body,
         )
 
-    # Back up the prompt file (CLAUDE.md / AGENTS.md / …) before we append, so
-    # the user can revert. No-op for a file we're creating fresh.
-    backup = backup_file_once(target)
-
     try:
         appended, detail = _append_block(target, body)
     except OSError as exc:
@@ -293,7 +263,6 @@ def install_prompt(
             status="failed",
             detail=f"cannot write {target}: {exc}",
             copy_paste_body=body,
-            backup_path=backup,
         )
 
     # BP-95: manifest-ingestion procedure — Claude gets the Skill bundle, every
@@ -307,7 +276,6 @@ def install_prompt(
         target_path=str(target),
         status="appended" if appended else "already_present",
         detail=detail,
-        backup_path=backup,
     )
 
 

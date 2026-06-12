@@ -36,9 +36,12 @@ def _upsert_map_form(
     """
     servers = config.setdefault(container_key, {})
     if not isinstance(servers, dict):
-        # Corrupt — reset.
-        config[container_key] = {server_key: server_block}
-        return config
+        # Non-destructive guarantee: a wrong-typed container would have to be
+        # rebuilt, destroying user content — refuse (installer pre-validates
+        # via _container_writable, so this is a guard for other callers).
+        raise ValueError(
+            f"config[{container_key!r}] is not a table — refusing to overwrite user content"
+        )
     servers[server_key] = server_block
     return config
 
@@ -62,8 +65,10 @@ def _upsert_array_form(
     """Array form: ``mcpServers`` is a list of objects with a ``name`` key."""
     servers = config.setdefault("mcpServers", [])
     if not isinstance(servers, list):
-        config["mcpServers"] = [{"name": server_key, **server_block}]
-        return config
+        # See _upsert_map_form: refuse rather than rebuild over user content.
+        raise ValueError(
+            "config['mcpServers'] is not a list — refusing to overwrite user content"
+        )
     # Drop existing entry then append.
     config["mcpServers"] = [
         s for s in servers if not (isinstance(s, dict) and s.get("name") == server_key)

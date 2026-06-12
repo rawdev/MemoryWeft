@@ -64,20 +64,30 @@ group/tag structure as `mweft_remember`.
 }
 ```
 
-- **Do not use a `domain` field** — the ingestion domain is enforced by the
-  server env (`K2G_USER_MEMORY_SAVE_DOMAIN`). Hard-coding it in the manifest is ignored.
+- **Do not use a `domain` field** — the manifest's own `domain` field is ignored
+  (domain scatter prevention). The write domain is set by `--domain` / server env
+  instead (see below).
 
 ---
 
 ## 4. CLI execution
 
 ```bash
-k2g-ingest-manifest path/to/ingest.manifest.json
+k2g-ingest-manifest path/to/ingest.manifest.json --domain <MWeft 저장 domain>
 # remove the temp manifest after ingest:
-k2g-ingest-manifest path/to/ingest.manifest.json --remove-after
+k2g-ingest-manifest path/to/ingest.manifest.json --domain <domain> --remove-after
 # re-ingest an updated document — changed items only (manifest needs file_path):
-k2g-ingest-manifest path/to/ingest.manifest.json --incremental
+k2g-ingest-manifest path/to/ingest.manifest.json --domain <domain> --incremental
 ```
+
+> **Always pass `--domain`** with the MCP's configured write domain — the same
+> domain MWeft saves to (the active project's domain; visible in any
+> `mweft_search` result's `searched_scope`, or via `mweft_sql_query`, and the
+> same value you pass to `mweft_auto_tag_summarize`). This CLI runs as a
+> **subprocess that does NOT inherit the MCP server's env**, so without `--domain`
+> the domain falls back to `ai_memory` and the document lands in the wrong store.
+> (`--domain` is a single domain and overrides env; the manifest's own field is
+> still ignored.)
 
 > **If `k2g-ingest-manifest` / `k2g-manifest-check` is "command not found"**:
 > these are console scripts inside the **mweft bundle's venv**, which the shell's
@@ -105,6 +115,7 @@ conversation-memory defaults. Passing `--tag` switches to **curated mode**:
 
 ```bash
 k2g-ingest-manifest docs.manifest.json \
+  --domain <MWeft 저장 domain> \       # MCP's write domain (always pass — §4)
   --working-folder project_docs \      # docs-only root (avoid polluting the conversational ai_memory)
   --tag ProjectX --tag Design          # user-confirmed tags (repeatable)
 ```

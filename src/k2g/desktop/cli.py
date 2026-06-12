@@ -98,7 +98,14 @@ def _resolve_entry(args: argparse.Namespace):
     if default_dir is not None:
         project_dir = default_dir.resolve()
         project_dir.mkdir(parents=True, exist_ok=True)
-        _ensure_registry_entry(project_dir)
+        # True first run (no prior project): seed the explorable sample DB so the
+        # Manager opens with data + a one-time intro instead of an empty
+        # create-DB prompt. Non-destructive (skips if a DB already sits here) and
+        # configures the entry's domain; falls back to a blank seed when no
+        # sample asset ships (e.g. an online build that omitted it).
+        from k2g.ui.sample_db import seed_sample_project
+        seed_sample_project(project_dir)
+        _ensure_registry_entry(project_dir)            # idempotent; blank seed if no sample
         entry = find_by_dir(project_dir)
         if entry is None:
             raise SystemExit(f"could not register project at {project_dir}")

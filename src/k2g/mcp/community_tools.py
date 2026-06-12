@@ -13,7 +13,11 @@ from collections import defaultdict
 from typing import Any
 
 from k2g.memory.source_axis import resolve_axis
-from k2g.trainer.community_freshness import read_leiden_params, resolve_latest_run
+from k2g.trainer.community_freshness import (
+    read_leiden_params,
+    resolve_latest_run,
+    resolve_run_domain_first,
+)
 
 _KIND = {"entity": "leiden_entity", "event": "leiden_event"}
 
@@ -362,7 +366,11 @@ def community_of_tool(
     """Which community a given entity/event belongs to + sample peers."""
     if kind not in _KIND:
         return {"error": f"kind must be 'entity' or 'event', got {kind!r}"}
-    run = resolve_latest_run(deps.db.graph, _KIND[kind], None)
+    # Resolve the node's OWN domain run (community runs are per-domain). A bare
+    # domain=None would resolve the stale cross-domain fallback and miss the
+    # node's real community — falsely reporting "no run" / "not in any community".
+    domain = _node_domain(deps.db.graph, kind, node_id)
+    run = resolve_run_domain_first(deps.db.graph, _KIND[kind], domain)
     if run is None:
         return {"error": f"no completed {_KIND[kind]} run"}
     run_id = run["id"]
@@ -402,6 +410,28 @@ def _exec(conn: Any, sql: str, params: tuple | list = ()):
         cur = conn.cursor()
         cur.execute(sql, params)
     return cur
+
+
+def _node_domain(graph: Any, kind: str, node_id: str) -> str | None:
+    """The domain of one entity/event node, for per-domain run resolution.
+
+    None when the node / its domain can't be read — callers then fall back to
+    the cross-domain run (see :func:`resolve_run_domain_first`)."""
+    conn = getattr(graph, "_conn", None)
+    if conn is None:
+        return None
+    tbl = "entities" if kind == "entity" else "events"
+    try:
+        cur = _exec(conn, f"SELECT domain FROM {tbl} WHERE id = ?", (node_id,))
+        row = cur.fetchone()
+    except Exception:  # noqa: BLE001
+        return None
+    if row is None:
+        return None
+    try:
+        return row["domain"]
+    except (KeyError, TypeError, IndexError):
+        return row[0]
 
 
 def _node_names(conn: Any, kind: str, ids: list[str]) -> dict[str, str]:

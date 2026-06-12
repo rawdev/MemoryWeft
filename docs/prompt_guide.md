@@ -125,8 +125,12 @@ embeds + links), landing in the same group/tag structure as `mw save`.
   set `"complete": true` only when fully written.
 - **Run** it yourself via shell:
   ```bash
-  k2g-ingest-manifest path/to/ingest.manifest.json --remove-after
+  k2g-ingest-manifest path/to/ingest.manifest.json --domain <save domain> --remove-after
   ```
+  **Always pass `--domain`** with MWeft's write domain (the active project's
+  domain — visible in any `mweft_search` result's `searched_scope`). This CLI is
+  a subprocess that does not inherit the MCP env, so without it the domain falls
+  back to `ai_memory` and the document lands in the wrong store.
   All-or-nothing (one bad item rejects the batch); re-running is dedup-safe.
 - **External documents** (corpus with a different author): switch to *curated*
   mode — `--working-folder <docs-root> --tag <Label>` with a **user-confirmed**

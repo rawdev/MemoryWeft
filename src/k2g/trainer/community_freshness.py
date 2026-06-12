@@ -207,6 +207,57 @@ def is_stale(conn: Any, kind: str, domain: str | None) -> bool:
     return (cur_count, cur_ts) != (ptr["base_count"], ptr["base_max_ts"])
 
 
+def set_pointer(
+    conn: Any,
+    kind: str,
+    domain: str | None,
+    *,
+    run_id: str,
+    base_count: int,
+    base_max_ts: str,
+) -> bool:
+    """Unconditionally point ``community_state`` at ``run_id`` (manual recompute).
+
+    Unlike :func:`advance_pointer`'s monotonic OCC CAS — which only advances when
+    the data version (``base_count`` / ``base_max_ts``) grows — this overwrites
+    the pointer regardless. A manual recompute is an explicit "make THIS
+    clustering the canonical view" action: e.g. changing ``theta_e`` on unchanged
+    data, where the CAS would otherwise refuse (same data version) and leave the
+    new run invisible to every pointer-based read (:func:`resolve_latest_run`).
+
+    The current data version is still stamped so later ingest-triggered staleness
+    checks stay correct. Returns True on success.
+    """
+    ph = _ph(conn)
+    now_fn = "NOW()" if _is_pg(conn) else "CURRENT_TIMESTAMP"
+    sql = (
+        "INSERT INTO community_state "
+        "(kind, domain, latest_run_id, base_count, base_max_ts, computed_at) "
+        f"VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {now_fn}) "
+        "ON CONFLICT (kind, domain) DO UPDATE SET "
+        "  latest_run_id = EXCLUDED.latest_run_id, "
+        "  base_count    = EXCLUDED.base_count, "
+        "  base_max_ts   = EXCLUDED.base_max_ts, "
+        f"  computed_at   = {now_fn}"
+    )
+    try:
+        ensure_table(conn)
+        _exec(
+            conn, sql,
+            (_KIND.get(kind, kind), _norm_domain(domain), run_id,
+             int(base_count), str(base_max_ts)),
+        )
+        if hasattr(conn, "commit"):
+            conn.commit()
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("set_pointer failed (kind=%s domain=%s): %s",
+                       kind, domain, exc)
+        if _is_pg(conn):
+            _safe_rollback(conn)
+        return False
+
+
 def advance_pointer(
     conn: Any,
     kind: str,
@@ -428,12 +479,37 @@ def resolve_latest_run(
         return None
 
 
+def resolve_run_domain_first(
+    graph: Any, kind: str, domain: str | None,
+) -> dict[str, Any] | None:
+    """Per-domain run, falling back to the cross-domain (``domain IS NULL``) run.
+
+    Domain-scoped views (an entity and its events all live in one domain) want
+    *their* domain's run. ``_ensure_run`` (web/routes/community.py) may seed only
+    a cross-domain (``domain=None``) run as a safety net, so fall back to it when
+    no per-domain run exists.
+
+    This is the correct call for entity/node-scoped consumers. A bare
+    ``resolve_latest_run(kind, None)`` is the bug it replaces: with ``domain=None``
+    the pointer lookup misses the per-domain ``community_state`` row and the
+    fallback resolves a *stale* cross-domain run, ignoring the richer per-domain
+    run entirely.
+    """
+    if domain:
+        run = resolve_latest_run(graph, kind, domain)
+        if run is not None:
+            return run
+    return resolve_latest_run(graph, kind, None)
+
+
 __all__ = [
     "ensure_table",
     "derive_version",
     "get_pointer",
     "is_stale",
     "advance_pointer",
+    "set_pointer",
     "resolve_latest_run",
+    "resolve_run_domain_first",
     "read_leiden_params",
 ]

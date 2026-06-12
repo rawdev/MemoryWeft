@@ -27,7 +27,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from k2g.mcp.schemas import HintBlock
-from k2g.trainer.community_freshness import resolve_latest_run
+from k2g.trainer.community_freshness import resolve_run_domain_first
 
 if TYPE_CHECKING:
     from k2g.mcp.factory import Deps
@@ -83,30 +83,30 @@ def _fetch_leiden_assignment(
 ) -> dict[str, int]:
     """Return a hit-id → community_id mapping for all hits (entity + event).
 
-    Performs one run_id lookup per kind (leiden_entity / leiden_event) and
-    one community-assignment call per kind. Does not modify K2G core —
-    uses existing graph methods. Failures on either side are isolated
+    Search is cross-domain, so hits can span domains; community runs are
+    per-domain. Group hits by (kind, domain) and resolve each group against its
+    own domain's run (domain-first, cross-domain fallback) — a single
+    ``domain=None`` lookup would resolve a stale cross-domain run and mis-map or
+    drop hits from other domains. Failures on any group are isolated
     (channel-presence-agnostic).
     """
+    from collections import defaultdict
+
     out: dict[str, int] = {}
-    entity_ids = [h.id for h in hits if h.kind == "entity"]
-    event_ids = [h.id for h in hits if h.kind == "event"]
-    if entity_ids:
-        run = resolve_latest_run(deps.graph, "leiden_entity")
-        if run and run.get("id"):
-            mapping = _safe(
-                deps.graph, "get_entity_community_for_run",
-                run["id"], entity_ids,
-            ) or {}
-            out.update(mapping)
-    if event_ids:
-        run = resolve_latest_run(deps.graph, "leiden_event")
-        if run and run.get("id"):
-            mapping = _safe(
-                deps.graph, "get_event_community_for_run",
-                run["id"], event_ids,
-            ) or {}
-            out.update(mapping)
+    # (leiden_kind, method, domain) -> [hit ids]
+    groups: dict[tuple[str, str, str | None], list[str]] = defaultdict(list)
+    for h in hits:
+        if h.kind == "entity":
+            groups[("leiden_entity", "get_entity_community_for_run", h.domain)].append(h.id)
+        elif h.kind == "event":
+            groups[("leiden_event", "get_event_community_for_run", h.domain)].append(h.id)
+
+    for (leiden_kind, method, domain), ids in groups.items():
+        run = resolve_run_domain_first(deps.graph, leiden_kind, domain)
+        if not (run and run.get("id")):
+            continue
+        mapping = _safe(deps.graph, method, run["id"], ids) or {}
+        out.update(mapping)
     return out
 
 

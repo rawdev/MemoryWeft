@@ -348,6 +348,26 @@ def _current_entry():
     return find_by_dir(current) if current else None
 
 
+@router.get("/sample-info")
+def get_sample_info() -> dict[str, Any]:
+    """First-run sample marker for the active project (one-time intro popup).
+
+    Returns ``{"sample": true, ...counts/db_path/domain}`` when this project was
+    seeded from the bundled sample DB, else ``{"sample": false}``. The Manager
+    shows the intro once (gated client-side by localStorage), then drops the user
+    on the AI install section.
+    """
+    from k2g.ui.sample_db import read_marker
+
+    current = _current_project_dir()
+    if not current:
+        return {"sample": False}
+    info = read_marker(Path(current))
+    if not info:
+        return {"sample": False}
+    return sanitize({"sample": True, **info})
+
+
 @router.get("/projects")
 def list_known_projects() -> dict[str, Any]:
     """Return the user-level project registry + which entry is currently active."""

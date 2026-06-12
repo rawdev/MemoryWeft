@@ -45,10 +45,15 @@ is defined in the guide.
    - Set `"complete": true` only when fully written.
 4. **Run the CLI** (the user's ingestion request is the consent):
    ```bash
-   k2g-ingest-manifest ./.k2g_tmp/ingest.manifest.json --remove-after
+   k2g-ingest-manifest ./.k2g_tmp/ingest.manifest.json --domain <MWeft 저장 domain> --remove-after
    # re-ingesting a source file? add --source for robust change detection:
-   k2g-ingest-manifest ./.k2g_tmp/ingest.manifest.json --source <orig> --remove-after
+   k2g-ingest-manifest ./.k2g_tmp/ingest.manifest.json --domain <domain> --source <orig> --remove-after
    ```
+   **Always pass `--domain`** with the MCP's write domain (the active project's
+   domain — the same value you pass to `mweft_auto_tag_summarize`, visible in any
+   `mweft_search` result's `searched_scope`). This CLI is a subprocess that does
+   NOT inherit the MCP env, so without `--domain` it falls back to `ai_memory`
+   (wrong store).
    **"command not found"?** `k2g-ingest-manifest` / `k2g-manifest-check` live in
    the mweft bundle's venv, which may not be on `PATH`. Do **not** fall back to
    per-event `mweft_remember` — **ask the user for the bundle location** and call
@@ -59,8 +64,10 @@ is defined in the guide.
 
 ## Notes
 
-- `domain` / `working_folder` are server-enforced via env — do **not** put a
-  `domain` field in the manifest. Omit `working_folder` to use the env default.
+- `domain` is set by `--domain` (the MCP's write domain — always pass it; a
+  subprocess does not inherit the MCP env, so env alone falls back to
+  `ai_memory`). Do **not** put a `domain` field in the manifest — it is ignored.
+  `working_folder` is server-enforced via env; omit it to use the env default.
 - All-or-nothing: any invalid item rejects the whole batch (no partial load).
 - Group/tag/forced-tag/community behavior matches `mweft_remember` — manifest
   saves land in the same structure as `mw save`.

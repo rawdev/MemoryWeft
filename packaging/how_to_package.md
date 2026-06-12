@@ -85,6 +85,7 @@ mweft/
   start-mweft.bat / start-mweft.command   # launcher (double-click)
   bin/uv(.exe)                            # static uv binary
   models/bge-m3-onnx/                     # bundled ONNX model (if --model-dir)
+  asset/mweft_sample/k2g_all_in_one.db    # first-run sample DB (if present at build)
   wheels/                                 # pre-downloaded wheels (offline mode)
   VERSION  README.txt  readme_kr.txt
 ```
@@ -130,6 +131,29 @@ macOS-x64 zips (each on its own runner) and uploads them to the Release for
 that tag. Because `mweft` is not on PyPI yet, the build uses **offline** mode:
 it builds the wheel locally and passes `--wheels-from dist` so the bundle is
 self-contained.
+
+### First-run sample DB (once)
+
+The bundle seeds an explorable sample DB on first launch (domain `sample_work`)
+instead of a blank "create a database" prompt. The sample (`k2g_all_in_one.db`,
+~16 MB) is **not committed** — it is a `*.db`, gitignored like the model, and
+publishing real sample memories into source history would bloat it permanently.
+Instead the release workflow fetches it from a pinned **`sample-data`** release
+and `build_portable` bundles it (it auto-detects `asset/mweft_sample/`).
+
+Set it up once (re-upload only when the sample changes):
+
+```bash
+# create/update a non-version release that just holds the sample DB asset
+gh release create sample-data asset/mweft_sample/k2g_all_in_one.db \
+    --title "First-run sample data" --notes "Bundled by release.yml" \
+    --prerelease   # or: gh release upload sample-data k2g_all_in_one.db --clobber
+```
+
+The fetch is best-effort: if the `sample-data` release/asset is missing, the
+build still succeeds and just ships without a sample (fresh installs then open
+the blank create-DB flow). For a **local** build, drop the file at
+`asset/mweft_sample/k2g_all_in_one.db` and `build_portable` picks it up.
 
 ### Manual offline build (before PyPI)
 

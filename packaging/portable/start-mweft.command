@@ -60,6 +60,9 @@ export K2G_USE_HUB=auto
 export EMBEDDING_PROVIDER=onnx
 export EMBEDDING_ONNX_PATH="$HERE/models/bge-m3-onnx"
 export EMBEDDING_DIM=1024
+# Bundled first-run sample DB — a fresh install seeds explorable demo data
+# (domain sample_work) + a one-time intro instead of a blank create-DB prompt.
+export MWEFT_SAMPLE_DIR="$HERE/asset/mweft_sample"
 # Lazy init: MCP servers the Manager registers defer heavy init to the first
 # tool call, so the AI client doesn't hit a startup timeout on first connect.
 export K2G_MCP_LAZY_INIT=true

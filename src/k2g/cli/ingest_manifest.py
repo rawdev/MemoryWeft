@@ -19,6 +19,12 @@ Usage (installed project):
 domain / working_folder are governed by server env
 (K2G_USER_MEMORY_SAVE_DOMAIN / K2G_USER_MEMORY_SAVE_GROUP);
 the manifest's domain field is ignored.
+
+When this CLI runs as a *subprocess* (the AI spawns it from a shell), it does
+NOT inherit the MCP server's env, so the env-resolved domain would fall back to
+``ai_memory`` — the wrong store. Pass ``--domain`` to convey the MCP's configured
+write domain explicitly; it takes precedence over env. (Still a single domain —
+never the manifest's own field — so domain scatter stays prevented.)
 """
 
 from __future__ import annotations
@@ -38,6 +44,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="AI manifest ingestion (zero LLM calls during load)",
     )
     p.add_argument("manifest", type=Path, help="Path to the *.manifest.json file to ingest")
+    p.add_argument("--domain", default=None, metavar="DOMAIN",
+                   help="Target write domain (single). Overrides the server env "
+                        "K2G_USER_MEMORY_SAVE_DOMAIN — pass the MCP's configured write "
+                        "domain here when running as a subprocess that doesn't inherit "
+                        "that env (otherwise it falls back to 'ai_memory'). The "
+                        "manifest's own domain field is still ignored.")
     p.add_argument("--session-id", default=None,
                    help="Staging session ID (default: timestamp). Used for staging isolation.")
     p.add_argument("--stage-root", default="",
@@ -70,6 +82,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--log-level", default="INFO",
                    choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return p.parse_args(argv)
+
+
+def _resolve_domain(args_domain: str | None, settings) -> str:
+    """Resolve the write domain for this ingest.
+
+    Precedence: explicit ``--domain`` (the MCP's configured write domain,
+    conveyed by the caller because a subprocess doesn't inherit the MCP env) >
+    server env ``K2G_USER_MEMORY_SAVE_DOMAIN`` > ``ai_memory`` fallback. The
+    manifest's own domain field never participates (scatter prevention).
+    """
+    if args_domain and args_domain.strip():
+        return args_domain.strip()
+    from k2g.memory.save_context import resolve_save_domain
+    domain, _ = resolve_save_domain(settings)
+    return domain
 
 
 def _post_load_sync(db, settings, domain: str, event_ids: list[str]) -> None:
@@ -184,7 +211,6 @@ def main(argv: list[str] | None = None) -> int:
 
     from k2g.core.config import DomainConfig
     from k2g.mcp.factory import build_dependencies
-    from k2g.memory.save_context import resolve_save_domain
     from k2g.producer.manifest import ManifestProducer
     from k2g.producer.manifest_schema import ManifestError
     from k2g.staging import StagingLoader, StagingWriter
@@ -195,8 +221,9 @@ def main(argv: list[str] | None = None) -> int:
     db = deps.db
     settings = deps.settings
 
-    # domain — forced from env. manifest's domain field is ignored.
-    domain, _ = resolve_save_domain(settings)
+    # domain — explicit --domain (the MCP's write domain, conveyed by the caller)
+    # takes precedence; otherwise forced from server env (see _resolve_domain).
+    domain = _resolve_domain(args.domain, settings)
     domain_config = DomainConfig({"domain": domain})
 
     print(f"[manifest] session={session_id} domain={domain} path={args.manifest}")

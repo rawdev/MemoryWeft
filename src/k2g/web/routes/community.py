@@ -23,7 +23,10 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 
 from k2g.web.deps import get_db_dep, sanitize
-from k2g.trainer.community_freshness import resolve_latest_run
+from k2g.trainer.community_freshness import (
+    resolve_latest_run,
+    resolve_run_domain_first,
+)
 from k2g.web.routes._sql import q_all, q_exec, q_one, q_rollback
 
 logger = logging.getLogger(__name__)
@@ -362,19 +365,33 @@ def recompute(
     """
     if target not in (*_KINDS, "both"):
         return {"error": f"target must be entity|event|both, got {target!r}"}
+    from k2g.trainer import community_freshness as cf
     from k2g.trainer.community_runner import run_community
+
+    conn = getattr(db.graph, "_conn", None)
+    # Stamp the CURRENT data version so later ingest staleness checks stay correct.
+    base_count, base_max_ts = cf.derive_version(conn, domain) if conn else (0, "")
 
     targets = list(_KINDS) if target == "both" else [target]
     results: list[dict] = []
     for t in targets:
         try:
-            results.append(
-                run_community(
-                    db, t, domain=domain, seed=seed,
-                    resolution=resolution, theta_e=theta_e, dry_run=dry_run,
-                    triggered_by="manual",
-                )
+            res = run_community(
+                db, t, domain=domain, seed=seed,
+                resolution=resolution, theta_e=theta_e, dry_run=dry_run,
+                triggered_by="manual",
             )
+            # A manual recompute is an explicit "make THIS the current view"
+            # action — force the pointer onto the new run unconditionally.
+            # advance_pointer's OCC CAS would refuse here (a theta_e change on
+            # unchanged data has the same data version), leaving the new run
+            # invisible to every pointer-based read. See set_pointer.
+            if not dry_run and conn and res.get("run_id"):
+                res["pointer_set"] = cf.set_pointer(
+                    conn, t, domain, run_id=res["run_id"],
+                    base_count=base_count, base_max_ts=base_max_ts,
+                )
+            results.append(res)
         except Exception as exc:  # noqa: BLE001
             logger.error("recompute failed target=%s: %s", t, exc)
             results.append({"target": t, "error": str(exc)})
@@ -402,16 +419,22 @@ def _community_color(community_id: int | None) -> str:
     return "#{:02x}{:02x}{:02x}".format(int(r * 255), int(g * 255), int(b * 255))
 
 
-def _fetch_community(graph: Any, kind: str, node_ids: list[str]) -> dict[str, int]:
+def _fetch_community(
+    graph: Any, kind: str, node_ids: list[str], domain: str | None = None,
+) -> dict[str, int]:
     """ego node ids -> community_id mapping (based on the latest leiden run).
 
-    Uses the same graph method as ``_fetch_leiden_assignment`` in hint.py — consistent.
+    ``domain`` is the ego center's domain — community runs are per-domain, so
+    resolve THAT domain's run (falling back to cross-domain). An ego graph is
+    within-domain, so a single resolve covers all nodes; cross-domain neighbors
+    (rare) simply map to no community. Uses the same graph method as
+    ``_fetch_leiden_assignment`` in hint.py.
     """
     if not node_ids:
         return {}
     run_kind = "leiden_entity" if kind == "entity" else "leiden_event"
     try:
-        run = resolve_latest_run(graph, run_kind)
+        run = resolve_run_domain_first(graph, run_kind, domain)
     except Exception:  # noqa: BLE001
         return {}
     if not run or not run.get("id"):
@@ -478,7 +501,7 @@ def _ego_entity(db: Any, node_id: str, max_n: int) -> dict:
             }
     # community
     all_ids = [node_id] + nb_ids
-    comm = _fetch_community(graph, "entity", all_ids)
+    comm = _fetch_community(graph, "entity", all_ids, cdom)
     center_cid = comm.get(node_id)
     nodes_out: list[dict[str, Any]] = []
     for nb in neighbors:
@@ -562,7 +585,7 @@ def _ego_event(db: Any, node_id: str, max_n: int) -> dict:
             summary_map[rid] = (summ or "")[:80]
     # community
     all_ids = [node_id] + nb_ids
-    comm = _fetch_community(graph, "event", all_ids)
+    comm = _fetch_community(graph, "event", all_ids, cdom)
     center_cid = comm.get(node_id)
     nodes_out: list[dict[str, Any]] = []
     for nb in neighbors:

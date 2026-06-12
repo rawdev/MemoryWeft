@@ -28,7 +28,6 @@ from k2g.installer.clients import (
 )
 from k2g.installer.locator import config_path, mirror_config_paths
 from k2g.installer.prompts import (
-    backup_file_once,
     install_prompt,
     uninstall_prompt,
 )
@@ -41,7 +40,7 @@ class ClientResult:
     slug: str
     label: str
     path: str | None = None
-    status: str = "pending"  # "applied" | "preview" | "removed" | "skipped" | "failed"
+    status: str = "pending"  # "applied" | "preview" | "removed" | "skipped" | "failed" | "blocked"
     detail: str = ""
     copy_paste_body: str | None = None
     # Prompt-file install (CLAUDE.md / .cursor/rules/mweft.md). For clients
@@ -51,10 +50,9 @@ class ClientResult:
     prompt_status: str | None = None    # appended / already_present / unsupported / preview / removed / not_present / failed
     prompt_detail: str = ""
     prompt_copy_paste_body: str | None = None
-    # Pristine backups taken before we modified each file (config + prompt), so
-    # the user can revert. None when nothing was backed up (new file).
-    config_backup: str | None = None
-    prompt_backup: str | None = None
+    # "blocked" only: the registry project the existing on-disk mweft entry
+    # points at (None when it matches no known project) — for the UI message.
+    pointed_name: str | None = None
 
 
 @dataclass
@@ -227,7 +225,13 @@ def _resolve_env(
     return _env_for_project(project_dir)
 
 
-def _read_json(path: Path) -> dict[str, Any]:
+def _read_json(path: Path) -> dict[str, Any] | None:
+    """Parse ``path`` as a JSON object.
+
+    ``{}`` for a missing/empty file (fresh install). ``None`` when the file
+    exists but cannot be faithfully preserved (unparseable / non-object) —
+    callers must refuse to write rather than rebuild over user content
+    (non-destructive guarantee; replaces the old "start fresh" behavior)."""
     if not path.is_file():
         return {}
     try:
@@ -236,12 +240,23 @@ def _read_json(path: Path) -> dict[str, Any]:
             return {}
         data = json.loads(text)
     except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("installer: failed to parse %s — starting fresh: %s", path, exc)
-        return {}
+        logger.warning("installer: cannot parse %s: %s", path, exc)
+        return None
     if not isinstance(data, dict):
-        logger.warning("installer: %s is not a JSON object — starting fresh", path)
-        return {}
+        logger.warning("installer: %s is not a JSON object", path)
+        return None
     return data
+
+
+def _container_writable(spec: MCPClientSpec, config: dict[str, Any]) -> bool:
+    """True when the server container has the shape we can surgically edit
+    (or is absent). A wrong-typed container would force a destructive reset —
+    refuse instead."""
+    if spec.schema == "array":
+        cont = config.get("mcpServers")
+        return cont is None or isinstance(cont, list)
+    cont = config.get(spec.container_key)
+    return cont is None or isinstance(cont, dict)
 
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -387,14 +402,17 @@ def _toml_remove_text(text: str, container_key: str, server_key: str) -> tuple[s
     return new_text, True
 
 
-def _read_text(path: Path) -> str:
+def _read_text(path: Path) -> str | None:
+    """``""`` for a missing file (fresh install); ``None`` when the file exists
+    but cannot be read back faithfully — callers must refuse to write rather
+    than rebuild over user content (same guarantee as :func:`_read_json`)."""
     if not path.is_file():
         return ""
     try:
         return path.read_text(encoding="utf-8")
-    except OSError as exc:
-        logger.warning("installer: failed to read %s — starting fresh: %s", path, exc)
-        return ""
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.warning("installer: cannot read %s: %s", path, exc)
+        return None
 
 
 def _atomic_write_text(path: Path, text: str) -> None:
@@ -433,6 +451,18 @@ def _process_one_toml(
 
     cr.path = str(path)
     existing = _read_text(path)
+    if existing is None:
+        # Non-destructive guarantee (see _process_one): never rewrite a file we
+        # cannot read back faithfully.
+        cr.status = "failed"
+        cr.detail = (
+            f"{path} exists but cannot be read — fix the file manually "
+            "(merge the block below for an install), then retry."
+        )
+        if operation == "install":
+            cr.copy_paste_body = table
+        _attach_prompt_result(cr, project_dir=project_dir, dry_run=dry_run, operation=operation)
+        return cr
 
     if operation == "install":
         merged = _toml_install_text(existing, spec.container_key, MCP_SERVER_KEY, server_block)
@@ -471,7 +501,6 @@ def _process_one_toml(
         _attach_prompt_result(cr, project_dir=project_dir, dry_run=dry_run, operation=operation)
         return cr
 
-    cr.config_backup = backup_file_once(path)
     try:
         _atomic_write_text(path, merged)
     except (OSError, PermissionError) as exc:
@@ -517,6 +546,21 @@ def _process_one(
 
     cr.path = str(path)
     existing = _read_json(path)
+    if existing is None or not _container_writable(spec, existing):
+        # Non-destructive guarantee: never rewrite a file we cannot faithfully
+        # preserve (unparseable JSON / wrong-typed server container). Refuse
+        # with a manual-merge body instead of rebuilding over user content.
+        cr.status = "failed"
+        cr.detail = (
+            f"{path} exists but is not JSON we can preserve — fix the file "
+            "manually (merge the block below for an install), then retry."
+        )
+        if operation == "install":
+            sample = spec.upsert({}, server_block)
+            cr.copy_paste_body = json.dumps(sample, indent=2, ensure_ascii=False)
+        _attach_prompt_result(cr, project_dir=project_dir,
+                              dry_run=dry_run, operation=operation)
+        return cr
     if operation == "install":
         new_body = spec.upsert(dict(existing), server_block)
     else:
@@ -530,7 +574,6 @@ def _process_one(
                               dry_run=dry_run, operation=operation)
         return cr
 
-    cr.config_backup = backup_file_once(path)
     try:
         _atomic_write_json(path, new_body)
     except (OSError, PermissionError) as exc:
@@ -549,11 +592,13 @@ def _process_one(
     # the mweft entry is synced).
     for mirror in mirror_config_paths(spec.slug, project_dir=project_dir):
         try:
+            mexisting = _read_json(mirror)
+            if mexisting is None or not _container_writable(spec, mexisting):
+                continue  # corrupt mirror — same non-destructive refusal
             mbody = (
-                spec.upsert(_read_json(mirror), server_block)
-                if operation == "install" else spec.remove(_read_json(mirror))
+                spec.upsert(mexisting, server_block)
+                if operation == "install" else spec.remove(mexisting)
             )
-            backup_file_once(mirror)
             _atomic_write_json(mirror, mbody)
         except (OSError, PermissionError):
             pass  # mirror is best-effort; the primary write already succeeded
@@ -596,7 +641,6 @@ def _attach_prompt_result(
     cr.prompt_status = pr.status
     cr.prompt_detail = pr.detail
     cr.prompt_copy_paste_body = pr.copy_paste_body
-    cr.prompt_backup = pr.backup_path
 
 
 def _not_initialized_report(
@@ -648,10 +692,15 @@ def is_installed(
         return False, str(p)
     if spec.serialization == "toml":
         try:
-            return _toml_has_server(_read_text(p), spec.container_key, MCP_SERVER_KEY), str(p)
+            text = _read_text(p)
+            if text is None:
+                return False, str(p)
+            return _toml_has_server(text, spec.container_key, MCP_SERVER_KEY), str(p)
         except Exception:  # noqa: BLE001
             return False, str(p)
     data = _read_json(p)
+    if data is None:  # corrupt — apply() will refuse to write anyway
+        return False, str(p)
     if spec.schema == "array":
         servers = data.get("mcpServers")
         ok = isinstance(servers, list) and any(
@@ -684,7 +733,7 @@ def read_client_mweft_env(
     block: Any = None
     if spec.serialization == "toml":
         try:
-            data = tomllib.loads(_read_text(p))
+            data = tomllib.loads(_read_text(p) or "")
         except Exception:  # noqa: BLE001
             return None
         cont = data.get(spec.container_key)
@@ -695,7 +744,7 @@ def read_client_mweft_env(
         return None
     else:
         data = _read_json(p)
-        cont = data.get(spec.container_key)
+        cont = data.get(spec.container_key) if data is not None else None
         if isinstance(cont, dict):
             block = cont.get(MCP_SERVER_KEY)
     if not isinstance(block, dict):
@@ -922,11 +971,19 @@ def apply(
     project_dir: str | Path | None = None,
     server_block: dict[str, Any] | None = None,
     entry_slug: str | None = None,
+    block_conflicts: bool = True,
 ) -> InstallReport:
     """Atomically write each client's config; copy-paste body on failure.
 
     ``entry_slug`` pins which registry entry's env is written when several entries
     share the same ``project_dir`` (resolves env by slug instead of by folder).
+
+    ``block_conflicts`` (default True): an install is refused whenever the client
+    already carries *any* mweft entry — no overwrite, no backups. The user must
+    Replace (uninstall→install) or Remove first; a bare re-Install never silently
+    rewrites an existing config. Project *activation* passes False: switching
+    projects is an explicit repoint of global clients (see
+    :func:`reapply_for_entry`).
     """
     try:
         sb = server_block or _build_default_server_block(
@@ -935,6 +992,25 @@ def apply(
         return _not_initialized_report(slugs, str(exc))
     report = InstallReport()
     for spec in _normalize_clients(slugs):
+        if block_conflicts:
+            conflict = install_conflict(
+                spec.slug, project_dir=project_dir, entry_slug=entry_slug)
+            if conflict.get("exists"):
+                pointed = conflict.get("pointed_name")
+                report.clients.append(ClientResult(
+                    slug=spec.slug,
+                    label=spec.label,
+                    path=conflict.get("path"),
+                    status="blocked",
+                    detail=(
+                        f"mweft is already installed (points at {pointed!r}) — "
+                        "Replace or Remove first"
+                        if pointed else
+                        "mweft is already installed — Replace or Remove first"
+                    ),
+                    pointed_name=pointed,
+                ))
+                continue
         report.clients.append(
             _process_one(spec, project_dir=project_dir, server_block=sb,
                          dry_run=False, operation="install"),
@@ -1006,7 +1082,10 @@ def reapply_for_entry(entry: Any) -> dict[str, Any]:
         cslug = c["slug"]
         c_pd = c.get("project_dir") or entry_pd
         try:
-            report = apply([cslug], project_dir=c_pd, entry_slug=slug)
+            # block_conflicts=False: activation deliberately repoints global
+            # clients from the previously-active project to this one.
+            report = apply([cslug], project_dir=c_pd, entry_slug=slug,
+                           block_conflicts=False)
             reapplied.extend(report.to_dict()["clients"])
         except Exception as exc:  # noqa: BLE001 — activation must never fail on a client write
             logger.warning("reapply_for_entry: %s failed: %s", cslug, exc)

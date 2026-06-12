@@ -14,7 +14,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from k2g.web.deps import get_stores_dep, sanitize
-from k2g.trainer.community_freshness import resolve_latest_run
+from k2g.trainer.community_freshness import resolve_run_domain_first
 from k2g.web.routes._sql import (  # alias: avoid clashing with the search route's q(query) param
     cursor,
     q_all as _sqlq_all,
@@ -351,7 +351,8 @@ def _get_entity_graph_impl(
     community_id: int | None = None
     community_note: str | None = None
     if community_only:
-        run = resolve_latest_run(graph, "leiden_entity", None)
+        # Resolve THIS entity's domain run (not a stale cross-domain fallback).
+        run = resolve_run_domain_first(graph, "leiden_entity", entity.get("domain"))
         if run is None:
             community_note = (
                 "No community info — run the Leiden computation on the Analysis page first. "
@@ -444,12 +445,15 @@ def _entity_event_communities_impl(
     conn = getattr(graph, "_conn", None)
     if conn is None:
         return {"error": "graph store does not expose _conn"}
-    run = resolve_latest_run(graph, "leiden_event", None)
+    run = resolve_run_domain_first(graph, "leiden_event", entity.get("domain"))
     if run is None:
+        # note_code: stable machine key — the Manager UI localizes it via i18n.
+        # `note` stays English for logs / non-UI callers (fallback).
         return {
             "entity": {"id": entity.get("id"), "name": entity.get("name")},
             "run_id": None,
             "communities": [],
+            "note_code": "no_event_run",
             "note": (
                 "No leiden_event run. Run the Leiden computation in the "
                 "Analysis -> Events tab first."
@@ -479,10 +483,14 @@ def _entity_event_communities_impl(
     """
     rows = _sqlq_all(conn, sql, (entity_id, run_id))
     if not rows:
+        # The entity has events, but none are in this run's community assignment
+        # — they are isolated below the edge threshold (theta_e), so Leiden left
+        # them unassigned. note_code is localized by the Manager UI.
         return {
             "entity": {"id": entity.get("id"), "name": entity.get("name")},
             "run_id": run_id,
             "communities": [],
+            "note_code": "entity_no_events",
             "note": "This entity has no events in the latest leiden_event run.",
         }
 
@@ -546,7 +554,12 @@ def _entity_events_in_community_impl(
     conn = getattr(graph, "_conn", None)
     if conn is None:
         return {"error": "graph store does not expose _conn"}
-    run = resolve_latest_run(graph, "leiden_event", None)
+    # Resolve this entity's domain run — must match the run used by
+    # _entity_event_communities_impl (which the listed community_id came from).
+    ent = graph.get_entity_by_id(entity_id)
+    run = resolve_run_domain_first(
+        graph, "leiden_event", ent.get("domain") if ent else None,
+    )
     if run is None:
         return {"events": [], "note": "No leiden_event run."}
     run_id = run.get("id") or run.get("run_id")

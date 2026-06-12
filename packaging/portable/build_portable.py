@@ -179,6 +179,21 @@ def main() -> None:
             Path(args.vc_runtime_dir).resolve() if args.vc_runtime_dir else None,
         )
 
+    # 3c) bundle the first-run sample DB so a fresh install opens with explorable
+    #     data + a one-time intro instead of a blank create-DB prompt. The
+    #     launcher exports MWEFT_SAMPLE_DIR so k2g.ui.sample_db finds it.
+    sample_src = REPO / "asset" / "mweft_sample" / "k2g_all_in_one.db"
+    if sample_src.is_file():
+        sample_dst = stage / "asset" / "mweft_sample"
+        sample_dst.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(sample_src, sample_dst / sample_src.name)
+        print(f"[sample] bundled {sample_src} -> {sample_dst}")
+    else:
+        print(f"[sample] WARNING: {sample_src} missing — no first-run sample DB "
+              f"bundled (fresh installs open the blank create-DB flow instead). "
+              f"Provide it locally, or via the `sample-data` release (see "
+              f"packaging/how_to_package.md).")
+
     # 4) (offline) pre-download wheels — for the current platform
     if args.mode == "offline":
         download_wheels(stage / "wheels", args.pkg, args.wheels_from)

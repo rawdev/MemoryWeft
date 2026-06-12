@@ -411,7 +411,10 @@ async function runWarmup() {
 
 // --- BP-90/91 Auto-Tag Analysis panel (Manager UI Page 4) ----------------
 
-let _AN_TAB = 'entity';            // entity | event | stopword
+let _AN_TAB = 'event';             // event | entity | scoped | stopword
+                                  // event is first: the entity tab's "events by
+                                  // cluster" view consumes the EVENT leiden run,
+                                  // so compute event before exploring entities.
 let _AN_PARAMS = { resolution: 1.0, seed: 42, theta_e: 0.4 };
 // Tab labels use i18n — t('an.tab.'+kind).
 
@@ -450,8 +453,8 @@ function _renderAnalysisShell() {
     </div>
 
     <div class="subtabs">
-      ${tabBtn('entity')}
       ${tabBtn('event')}
+      ${tabBtn('entity')}
       ${tabBtn('scoped')}
       ${tabBtn('stopword')}
     </div>
@@ -571,8 +574,17 @@ async function _anExploreSelectEntity(entityId, entityName) {
     if (cBody) cBody.innerHTML = `<div class="sx-empty" style="color:red">${escapeHtml(data.error)}</div>`;
     return;
   }
-  if (data.note && (!data.communities || data.communities.length === 0)) {
-    if (cBody) cBody.innerHTML = `<div class="sx-empty" style="color:#b45309">${escapeHtml(data.note)}</div>`;
+  if ((data.note_code || data.note) && (!data.communities || data.communities.length === 0)) {
+    // Prefer the localized message keyed by the stable note_code; fall back to
+    // the backend's English note for any unmapped/legacy code (t() returns the
+    // key unchanged when a translation is missing).
+    let msg = data.note || '';
+    if (data.note_code) {
+      const key = 'an.exp.note.' + data.note_code;
+      const loc = t(key);
+      if (loc !== key) msg = loc;
+    }
+    if (cBody) cBody.innerHTML = `<div class="sx-empty" style="color:#b45309">${escapeHtml(msg)}</div>`;
     return;
   }
   _AN_EXPLORE.communities = data.communities || [];
@@ -637,6 +649,7 @@ function _anEntityHtml() {
     <div class="card">
       <h3 style="margin-top:0;">${t('an.entity.title')}</h3>
       <div class="muted" style="font-size:12px; margin-bottom:8px;">${t('an.entity.desc')}</div>
+      <div style="font-size:12px; line-height:1.6; margin-bottom:10px; padding:8px 10px; border:1px solid #2563eb; background:#eff6ff; border-radius:6px;">${t('an.entity.depNote')}</div>
       <div class="row" style="margin-bottom:10px; gap:8px; align-items:center; flex-wrap:wrap;">
         <input type="text" id="ego-query" placeholder="${t('an.ph.entitySearch')}" style="width:300px"
                onkeydown="if(event.key==='Enter') buildEntityGraph()">
@@ -3895,9 +3908,7 @@ async function showProjectSetupPanel(initialProjectDir, slug, targetEl) {
     <div class="muted" style="font-size: 12px; margin-bottom: 8px;">${t('ps.s2desc')}</div>
     <div style="display:flex; align-items:center; gap:10px; margin:8px 0 4px;">
       <h4 style="margin:0;">${t('ps.installedTitle')}</h4>
-      <button onclick="_psApplyAllMCP()">${t('ps.applyAllMcp')}</button>
     </div>
-    <div class="muted" style="font-size:11px; color:#b45309; margin:2px 0 6px;">${t('ps.applyAllWarn')}</div>
     <div id="ps-installed"><div class="muted">${t('common.loading')}</div></div>
     <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:10px;">
       <select id="ps-add-ai" style="min-width:320px"></select>
@@ -4278,6 +4289,7 @@ function _renderAiClients() {
         <div style="display:flex; align-items:center; gap:8px;">
           <b>${escapeHtml(label)}</b>
           <button class="primary" onclick="_psInstallAI(${idx})" style="font-size:11px;">${t('ps.installAi')}</button>
+          <button onclick="_psReplaceAI(${idx})" style="font-size:11px;">${t('ps.replaceAi')}</button>
           <button onclick="_psRemoveAI(${idx})" style="color:#b91c1c; font-size:11px;">${t('ps.removeAi')}</button>
           <span class="muted" style="font-size:11px;">· ${escapeHtml(scope)}</span>
         </div>
@@ -4379,28 +4391,14 @@ async function _psInstallAI(idx) {
   const body = { clients: [slug] };
   if (_PS_SLUG) body.slug = _PS_SLUG;   // pin env to this entry (folder may be shared)
   if (projDir) body.project_dir = projDir;
-  // Preflight: install upserts (overwrites) any existing mweft block. Warn before
-  // silently repointing one that already targets a *different* project. Best-effort.
-  try {
-    const pf = await fetch('/api/installer/preflight', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-    }).then(r => r.json());
-    const c = (pf.clients || []).find(x => x.slug === slug);
-    if (c && c.exists && !c.same) {
-      const who = c.pointed_name || t('ps.conflictUnknown');
-      if (!confirm(t('ps.confirmOverwriteMcp', { name: who }))) {
-        out.innerHTML = `<div class="muted">${t('common.canceled')}</div>`;
-        return;
-      }
-    }
-  } catch (e) { /* preflight is best-effort — fall through to apply */ }
+  // No preflight confirm: the backend refuses installs over an existing mweft
+  // entry that points elsewhere (status "blocked") — remove-first is the policy.
   out.innerHTML = `<div class="muted"><span class="sx-spinner"></span> ${t('common.loading')}</div>`;
   try {
     const data = await fetch('/api/installer/apply', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     }).then(r => r.json());
     _renderInstallerRows(data, out);
-    _psBackupNotice(data);
     if (!client.requires_project_dir) _psRenderRestartBanner([client.label || slug], out);
     // Reflect the resolved config path in the row (display only — not persisted;
     // the list stays user-managed).
@@ -4440,47 +4438,42 @@ async function _psRemoveAI(idx) {
   }
 }
 
-// Re-apply the current project settings to every *installed* AI client at once.
-// Pushes the latest env (DATA_DIR / domain / save_tags) into each client's MCP
-// config — the manual twin of what /projects/activate does on every switch.
-async function _psApplyAllMCP() {
+// "Replace" — refresh an existing install in place: uninstall (config entry +
+// prompt block + skill/guide) then install the latest. This is the update path
+// for stale prompts and for configs the conflict gate would otherwise block.
+// The list row is kept (unlike Remove, which also drops it).
+async function _psReplaceAI(idx) {
   const out = document.getElementById('inst-result');
-  const projDir = (document.getElementById('ps-project-dir') || {}).value.trim();
-  // Apply every client in THIS project's list (registry ai_clients) — the manual
-  // twin of pressing "Install" on each row. No disk scan; the list is authoritative.
-  const installed = _PS_AI.slice();
-  if (!installed.length) { out.innerHTML = `<div class="muted">${t('ps.noneInstalled')}</div>`; return; }
-  if (!confirm(t('ps.confirmApplyAll', { count: installed.length }))) return;
+  const ai = _PS_AI[idx];
+  if (!ai) return;
+  const slug = ai.slug;
+  const client = _PS_CLIENTS.find(c => c.slug === slug) || {};
+  const label = client.label || slug;
+  if (!confirm(t('ps.confirmReplaceAi', { name: label }))) return;
   // Save first so the installer derives the latest env from the registry entry.
   const saved = await _psSaveCore({ silentOnReuse: true });
   if (!saved.ok) { out.innerHTML = `<div style="color:red">${t('ps.saveFailForm')}</div>`; return; }
+  const projDir = client.requires_project_dir
+    ? (ai.project_dir || (document.getElementById('ps-project-dir') || {}).value.trim()) : '';
+  const body = { clients: [slug] };
+  if (_PS_SLUG) body.slug = _PS_SLUG;
+  if (projDir) body.project_dir = projDir;
   out.innerHTML = `<div class="muted"><span class="sx-spinner"></span> ${t('common.loading')}</div>`;
-  // Apply each entry with ITS OWN folder. A single bulk apply with one
-  // project_dir would write every project client into the same folder (anchor /
-  // last), leaving the others empty — so loop per entry, each to its project_dir.
-  const allRows = [];
-  const globals = [];
-  for (const c of installed) {
-    const client = _PS_CLIENTS.find(x => x.slug === c.slug) || {};
-    const cProjDir = client.requires_project_dir ? (c.project_dir || projDir) : '';
-    const body = { clients: [c.slug] };
-    if (_PS_SLUG) body.slug = _PS_SLUG;
-    if (cProjDir) body.project_dir = cProjDir;
-    try {
-      const data = await fetch('/api/installer/apply', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-      }).then(r => r.json());
-      (data.clients || []).forEach(r => allRows.push(r));
-      _psBackupNotice(data);
-      if (!client.requires_project_dir) globals.push(client.label || c.slug);
-    } catch (e) {
-      allRows.push({ slug: c.slug, status: 'failed', detail: String(e) });
-    }
+  try {
+    const rm = await fetch('/api/installer/uninstall', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }).then(r => r.json());
+    const add = await fetch('/api/installer/apply', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }).then(r => r.json());
+    _renderInstallerRows({ clients: [...(rm.clients || []), ...(add.clients || [])] }, out);
+    if (!client.requires_project_dir) _psRenderRestartBanner([label], out);
+    const applied = (add.clients || []).find(c => c.slug === slug);
+    if (applied && applied.path) { ai.config_path = applied.path; _renderAiClients(); }
+    _loadGlobalAiList();   // refresh the global-AI matrix in place (was stale until restart)
+  } catch (e) {
+    out.innerHTML = `<div style="color:red">${escapeHtml(String(e))}</div>`;
   }
-  _renderInstallerRows({ clients: allRows }, out);
-  if (globals.length) _psRenderRestartBanner(globals, out);
-  _renderAiClients();
-  _loadGlobalAiList();   // refresh the global-AI matrix in place (was stale until restart)
 }
 
 // Amber "restart these global apps" banner, appended under a result area.
@@ -4498,24 +4491,53 @@ function _psRenderRestartBanner(labels, target) {
 
 // Rich per-client result renderer (status + config + prompt) — shared by add/remove.
 function _renderInstallerRows(data, target) {
+  _PS_PASTE_INFO = {};
+  let autoPopupSlug = null;
   const rows = (data.clients || []).map(c => {
     const colour = {
       applied: 'green', preview: '#888', removed: 'green',
-      skipped: '#888', failed: 'red',
+      skipped: '#888', failed: 'red', blocked: '#b45309',
     }[c.status] || '#000';
+    // Install refused: an existing mweft entry must be removed first (no
+    // overwrite, no backups). Localized message replaces the backend detail.
+    const blockedRow = c.status === 'blocked'
+      ? `<div style="font-size:13px; color:#b45309; margin-top:3px; line-height:1.6;">⛔ ${
+          t(c.pointed_name ? 'ps.blockedExisting' : 'ps.blockedExistingUnknown',
+            { name: escapeHtml(c.pointed_name || '') })}</div>`
+      : '';
     const cbody = c.copy_paste_body
-      ? `<details><summary class="muted">Show config</summary><pre>${escapeHtml(c.copy_paste_body)}</pre></details>`
+      ? `<details><summary class="muted">${t('ps.showConfig')}</summary><pre>${escapeHtml(c.copy_paste_body)}</pre></details>`
       : '';
     const promptColour = {
       appended: 'green', written: 'green', removed: 'green',
       already_present: '#888', not_present: '#888',
       preview: '#888', unsupported: '#888', failed: 'red',
     }[c.prompt_status] || '#888';
+    // Clients with no file-prompt convention (Claude Desktop / ChatGPT / Continue):
+    // the prompt must be pasted by hand — render a prominent how-to panel instead
+    // of the raw backend detail, and pop the guide up once after a fresh install.
+    const isPaste = c.prompt_status === 'unsupported' && c.prompt_copy_paste_body;
+    if (isPaste) {
+      _PS_PASTE_INFO[c.slug] = { body: c.prompt_copy_paste_body, label: c.label || c.slug };
+      if (!autoPopupSlug && c.status === 'applied') autoPopupSlug = c.slug;
+    }
     const promptBody = c.prompt_copy_paste_body
-      ? `<details style="margin-top:4px"><summary class="muted">Show prompt (paste manually)</summary><pre>${escapeHtml(c.prompt_copy_paste_body)}</pre></details>`
+      ? `<details style="margin-top:4px"><summary class="muted">${t('ps.pasteShow')}</summary><pre>${escapeHtml(c.prompt_copy_paste_body)}</pre></details>`
       : '';
     const promptStale = c.prompt_status === 'already_present'
       ? `<div style="font-size:11px; color:#b45309; margin-top:3px; line-height:1.5;">${t('ps.promptAlreadyPresent')}</div>`
+      : '';
+    const pastePanel = isPaste
+      ? `<div style="margin-top:6px; padding:10px 12px; border:1px solid #2563eb; background:#eff6ff; border-radius:6px;">
+           <div style="font-size:15px; font-weight:700;">${t('ps.pasteTitle')}</div>
+           <div class="muted" style="font-size:12px; margin-top:4px; line-height:1.5;">${t('ps.pasteIntro')}</div>
+           <div style="font-size:16px; font-weight:700; margin-top:8px; line-height:1.6;">👉 ${t('ps.pasteWhere.' + _psWhereKey(c.slug))}</div>
+           ${_psWhere2(c.slug)}
+           <div style="margin-top:8px; display:flex; gap:8px;">
+             <button onclick="_psCopyPrompt('${escapeHtml(c.slug)}', this)" style="font-weight:600;">${t('ps.pasteCopy')}</button>
+             <button onclick="_psShowPastePopup('${escapeHtml(c.slug)}')">${t('ps.pasteGuideBtn')}</button>
+           </div>
+         </div>`
       : '';
     const promptRow = c.prompt_status
       ? `<div style="margin-top:4px; padding-left:8px; border-left:2px dotted #ccc;">
@@ -4523,7 +4545,8 @@ function _renderInstallerRows(data, target) {
              📝 prompt: <b style="color:${promptColour}">[${escapeHtml(c.prompt_status)}]</b>
              ${c.prompt_path ? '· ' + escapeHtml(c.prompt_path) : ''}
            </div>
-           ${c.prompt_detail ? `<div class="muted" style="font-size:11px">${escapeHtml(c.prompt_detail)}</div>` : ''}
+           ${c.prompt_detail && !isPaste ? `<div class="muted" style="font-size:11px">${escapeHtml(c.prompt_detail)}</div>` : ''}
+           ${pastePanel}
            ${promptStale}
            ${promptBody}
          </div>`
@@ -4531,25 +4554,93 @@ function _renderInstallerRows(data, target) {
     return `<div style="margin: 6px 0; padding: 6px; border-left: 3px solid ${colour};">
         <div><b style="color:${colour}">[${escapeHtml(c.status)}]</b> ${escapeHtml(c.label)}</div>
         ${c.path ? `<div class="muted" style="font-size:11px">${escapeHtml(c.path)}</div>` : ''}
-        ${c.detail ? `<div class="muted" style="font-size:11px">${escapeHtml(c.detail)}</div>` : ''}
+        ${blockedRow}
+        ${c.detail && c.status !== 'blocked' ? `<div class="muted" style="font-size:11px">${escapeHtml(c.detail)}</div>` : ''}
         ${cbody}
         ${promptRow}
       </div>`;
   }).join('');
   target.innerHTML = rows || '<div class="muted">(no results)</div>';
+  if (autoPopupSlug) _psShowPastePopup(autoPopupSlug);
 }
 
-// After an install, tell the user their files were backed up (pristine copies)
-// and that they can revert. Lists each `.mweft-bak` path. No-op when nothing was
-// backed up (only freshly-created files).
-function _psBackupNotice(data) {
-  const baks = [];
-  (data.clients || []).forEach(c => {
-    if (c.config_backup) baks.push(c.config_backup);
-    if (c.prompt_backup) baks.push(c.prompt_backup);
-  });
-  const uniq = [...new Set(baks)];
-  if (uniq.length) alert(t('ps.backupNotice', { list: uniq.join('\n') }));
+// --- Manual prompt-paste flow (clients without a file-based system prompt) ---
+
+// Bodies for the paste flow, keyed by client slug. The result HTML is
+// string-injected, so the button handlers look data up here.
+let _PS_PASTE_INFO = {};
+
+function _psWhereKey(slug) {
+  return ['claude_desktop', 'chatgpt', 'continue'].includes(slug) ? slug : 'generic';
+}
+
+// Optional second "where" line (smaller print under the big arrow line).
+function _psWhere2(slug) {
+  const s = t('ps.pasteWhere2.' + _psWhereKey(slug));
+  return s && !s.startsWith('ps.pasteWhere2.')
+    ? `<div class="muted" style="font-size:12px; margin-top:2px;">${s}</div>`
+    : '';
+}
+
+function _psCopyFallback(text) {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch (e) { return false; }
+}
+
+function _psCopyPrompt(slug, btn) {
+  const info = _PS_PASTE_INFO[slug];
+  if (!info) return;
+  const done = () => {
+    if (!btn) return;
+    const old = btn.textContent;
+    btn.textContent = t('ps.pasteCopied');
+    setTimeout(() => { btn.textContent = old; }, 2000);
+  };
+  const fail = () => alert(t('ps.pasteCopyFail'));
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(info.body).then(done, () => (_psCopyFallback(info.body) ? done() : fail()));
+  } else {
+    _psCopyFallback(info.body) ? done() : fail();
+  }
+}
+
+// Big-print popup: where to paste + the prompt body + a copy button.
+function _psShowPastePopup(slug) {
+  const info = _PS_PASTE_INFO[slug];
+  if (!info) return;
+  const prev = document.getElementById('ps-paste-backdrop');
+  if (prev) prev.remove();
+  const bd = document.createElement('div');
+  bd.id = 'ps-paste-backdrop';
+  bd.className = 'fsb-backdrop';
+  bd.innerHTML = `
+    <div class="fsb-modal" style="width:640px;">
+      <div class="fsb-head">
+        <b style="font-size:15px;">${t('ps.pasteTitle')}</b>
+        <span class="muted" style="font-size:12px;">${escapeHtml(info.label)}</span>
+      </div>
+      <div style="padding:12px 14px; overflow-y:auto; flex:1;">
+        <div style="font-size:17px; font-weight:700; line-height:1.6;">👉 ${t('ps.pasteWhere.' + _psWhereKey(slug))}</div>
+        ${_psWhere2(slug)}
+        <div class="muted" style="font-size:12px; margin-top:8px; line-height:1.5;">${t('ps.pasteIntro')}</div>
+        <pre style="margin-top:8px; max-height:38vh; overflow:auto; background:#f8f8f8; border:1px solid #ddd; border-radius:4px; padding:8px; font-size:11px; white-space:pre-wrap;">${escapeHtml(info.body)}</pre>
+      </div>
+      <div class="fsb-actions" style="display:flex; gap:8px; justify-content:flex-end;">
+        <button onclick="_psCopyPrompt('${escapeHtml(slug)}', this)" style="font-weight:600;">${t('ps.pasteCopy')}</button>
+        <button onclick="document.getElementById('ps-paste-backdrop').remove()">${t('ps.pasteClose')}</button>
+      </div>
+    </div>`;
+  bd.addEventListener('click', (e) => { if (e.target === bd) bd.remove(); });
+  document.body.appendChild(bd);
 }
 
 // --- BP-78 Step 11 — fsBrowser modal -------------------------------------
@@ -4692,9 +4783,12 @@ function _fsbRender() {
   }
 }
 
-// --- First-run onboarding (explains project / domain / group / tags) -------
+// --- Create-DB onboarding (explains project / domain / group / tags) -------
 // Shows once per unconfigured project; on completion it saves domain/group/tags
 // (preserving the existing embedding/backend) and warms up the embedding model.
+// NOTE: no longer auto-fired at boot — first run now shows the sample-DB intro
+// (maybeFirstRun, bottom of file). This configurator is RETAINED and still used
+// for manual project registration (_onbForceShow). Do not delete as dead code.
 const _ONB_KEY = 'mweft_onboarded:';
 let _ONB_CFG = null, _ONB_SLUG = null, _ONB_DIR = '';
 let _ONB_MODE = 'active';   // 'active' = first-run for the open project; 'register' = just-registered project
@@ -4920,12 +5014,90 @@ async function _gotoProjectInstall(slug) {
   }
 }
 
+// --- First-run sample intro (replaces the create-DB onboarding at boot) ------
+// A fresh install seeds an explorable sample DB (backend k2g.ui.sample_db); this
+// one-time popup tells the user where the data lives + how to query it from an
+// AI, then sends them to the AI (MCP) install section. The create-DB onboarding
+// above is KEPT for manual project registration (_onbForceShow) — it just no
+// longer auto-fires on first launch. Gated once per project via localStorage.
+const _SAMPLE_KEY = 'mweft_sample_intro:';
+let _SAMPLE_SLUG = null, _SAMPLE_ACTIVE_KEY = '';
+
+function _sampleIntroSeen(key) {
+  try { return !!localStorage.getItem(_SAMPLE_KEY + (key || '')); } catch (e) { return false; }
+}
+function _sampleIntroDismiss(key) {
+  try { localStorage.setItem(_SAMPLE_KEY + (key || ''), '1'); } catch (e) { /* ignore */ }
+}
+
+async function maybeFirstRun() {
+  let slug = null;
+  try {
+    const proj = await fetch('/api/projects').then((r) => r.json());
+    slug = proj.current_slug || null;
+  } catch (e) { /* best-effort */ }
+  let info = null;
+  try { info = await fetch('/api/sample-info').then((r) => r.json()); }
+  catch (e) { return; }
+  if (!info || !info.sample) return;          // not sample-seeded → show nothing
+  const key = slug || info.data_dir || 'sample';
+  if (_sampleIntroSeen(key)) return;
+  showSampleIntro(info, slug, key);
+}
+
+function _sampleNum(n) { return (n == null) ? '—' : String(n); }
+
+function showSampleIntro(info, slug, key) {
+  _SAMPLE_SLUG = slug; _SAMPLE_ACTIVE_KEY = key;
+  const dbPath = escapeHtml(info.db_path || '');
+  const domain = escapeHtml(info.domain || 'sample_work');
+  const counts = t('sample.loc.counts', {
+    events: _sampleNum(info.events),
+    entities: _sampleNum(info.entities),
+    groups: _sampleNum(info.groups),
+    domain,
+  });
+  const o = document.createElement('div');
+  o.id = 'sample-overlay'; o.className = 'onb-overlay';
+  o.innerHTML = `
+    <div class="onb-card" role="dialog" aria-modal="true" aria-labelledby="sample-title">
+      <h2 id="sample-title" style="margin:0 0 4px;">${t('sample.title')}</h2>
+      <div class="muted" style="font-size:13px; margin-bottom:8px;">${t('sample.intro')}</div>
+      <div class="onb-sec">
+        <div class="onb-h">${t('sample.loc.title')}</div>
+        <div class="onb-b">${t('sample.loc.body')}</div>
+        <div class="onb-b" style="margin-top:6px; font-family:monospace; word-break:break-all; color:#0f172a;">${dbPath}</div>
+        <div class="onb-b" style="margin-top:6px;">${counts}</div>
+      </div>
+      <div class="onb-sec">
+        <div class="onb-h">${t('sample.test.title')}</div>
+        <div class="onb-b">${t('sample.test.body')}</div>
+        <ul class="onb-b" style="margin:6px 0 0; padding-left:18px;">
+          <li>${t('sample.test.q1')}</li>
+          <li>${t('sample.test.q2')}</li>
+        </ul>
+      </div>
+      <div class="onb-actions">
+        <button class="onb-start" onclick="_sampleIntroConfirm()">${t('sample.gotoAi')}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(o);
+}
+
+async function _sampleIntroConfirm() {
+  const o = document.getElementById('sample-overlay');
+  _sampleIntroDismiss(_SAMPLE_ACTIVE_KEY);
+  if (o) o.remove();
+  // Drop the user on Settings → this project's AI (MCP) install section.
+  try { await _gotoProjectInstall(_SAMPLE_SLUG); } catch (e) { /* best-effort */ }
+}
+
 window.addEventListener('DOMContentLoaded', async () => {
   await loadLanguages();
   await applyLanguage(_initialLang(), { rerender: false });
   await loadCurrentProject();
   await loadDomains();
   showTab('intro');
-  maybeShowOnboarding();   // first-run: explain project/domain/group/tags, then warm up
+  maybeFirstRun();         // first-run: sample-DB intro → AI install (create-DB onboarding kept for manual registration)
   loadAppVersion();        // appbar version + update nudge (best-effort, non-blocking)
 });
