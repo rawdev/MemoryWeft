@@ -138,6 +138,18 @@ function _initialLang() {
   let saved = null;
   try { saved = localStorage.getItem(_LANG_STORE_KEY); } catch (e) { /* ignore */ }
   if (saved && _LANGS.find(l => l.code === saved)) return saved;
+  // First run (no saved choice): match the OS/browser locale when we ship that
+  // language, so a Korean system opens in Korean instead of always English.
+  try {
+    const navLangs = (navigator.languages && navigator.languages.length)
+      ? navigator.languages : [navigator.language];
+    for (const nl of navLangs) {
+      if (!nl) continue;
+      const base = String(nl).toLowerCase().split('-')[0];
+      const hit = _LANGS.find(l => l.code === base);
+      if (hit) return hit.code;
+    }
+  } catch (e) { /* ignore — fall back to default */ }
   return _I18N_DEFAULT;
 }
 
@@ -169,6 +181,10 @@ async function applyLanguage(code, opts) {
   applyStaticI18n();
   renderLangSelect();
   _renderAppVersion(_APP_VER);   // appbar version labels follow the language
+  // Replay the important-notice marquee in the new language (no-op until it has
+  // been fetched). Lets a user who switches to Korean see the Korean text even
+  // though the first pass ran in the launch language.
+  if (_IMPORTANT_NOTICE) renderImportantNotice();
   if (rerender) {
     const active = document.querySelector('nav.tabs button.on');
     showTab(active ? active.dataset.tab : 'intro');
@@ -260,6 +276,48 @@ async function loadAppVersion() {
     _APP_VER = { current: '?', checked: false, release_url: 'https://github.com/rawdev/MemoryWeft/releases/latest' };
   }
   _renderAppVersion(_APP_VER);
+}
+
+// --- Important-notice marquee --------------------------------------------
+// Fetches the single latest notice (server-side proxy → onminimum.com) and, if
+// present, scrolls it once across a one-line bar under the appbar, then removes
+// the bar. No click, no close button, no persistence — it just plays once per
+// launch (per the requested behavior). Best-effort: any failure shows nothing.
+const _NOTICE_LVL = { info: 'lvl-info', warn: 'lvl-warn', warning: 'lvl-warn', critical: 'lvl-crit', crit: 'lvl-crit' };
+let _IMPORTANT_NOTICE;   // undefined = not fetched, null = none, object = notice
+
+async function loadImportantNotice() {
+  try {
+    const r = await fetch('/api/app/important-notice');
+    const n = (await r.json()).notice;
+    _IMPORTANT_NOTICE = (n && typeof n === 'object') ? n : null;
+  } catch (e) { _IMPORTANT_NOTICE = null; return; }
+  renderImportantNotice();
+}
+
+// Render the cached notice as a one-pass marquee in the CURRENT language. The
+// bar is hidden+cleared (not removed) after one pass so a later language switch
+// can replay it — otherwise a ko user who first sees the English pass would
+// never get the Korean text. Re-invoked from applyLanguage().
+function renderImportantNotice() {
+  const bar = document.getElementById('notice-bar');
+  if (!bar) return;
+  const hide = () => { bar.hidden = true; bar.innerHTML = ''; bar.className = 'notice-bar'; };
+  const n = _IMPORTANT_NOTICE;
+  if (!n) { hide(); return; }
+  const lang = (document.getElementById('lang-select') || {}).value || _LANG || 'en';
+  const txt = (n.text && (n.text[lang] || n.text.en || n.text.ko))
+    || (typeof n.text === 'string' ? n.text : '');
+  if (!txt || !txt.trim()) { hide(); return; }
+  const lvl = _NOTICE_LVL[String(n.level || 'info').toLowerCase()] || 'lvl-info';
+  // Readable pace: ~0.18s per char, clamped so short notices aren't a blink and
+  // long ones don't crawl forever.
+  const dur = Math.max(8, Math.min(60, txt.length * 0.18));
+  bar.className = 'notice-bar ' + lvl;
+  bar.innerHTML = `<span class="track" style="animation-duration:${dur}s">📢&nbsp;&nbsp;${escapeHtml(txt)}</span>`;
+  bar.hidden = false;
+  const track = bar.querySelector('.track');
+  if (track) track.addEventListener('animationend', hide);
 }
 
 /** Build a small inline "Domain:" selector for pages that need it.
@@ -5105,4 +5163,5 @@ window.addEventListener('DOMContentLoaded', async () => {
   showTab('intro');
   maybeFirstRun();         // first-run: sample-DB intro → AI install (create-DB onboarding kept for manual registration)
   loadAppVersion();        // appbar version + update nudge (best-effort, non-blocking)
+  loadImportantNotice();   // one-pass marquee for the latest important notice (best-effort)
 });

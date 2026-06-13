@@ -33,6 +33,18 @@
   .appbar select { padding: 5px 8px; border-radius: 6px; border: 1px solid #374151;
                    background: #1f2937; color: #fff; font-size: 13px; min-width: 160px; }
 
+  /* Important-notice marquee: single line, one pass, then auto-removed (JS). */
+  .notice-bar { overflow: hidden; white-space: nowrap; height: 30px; line-height: 30px;
+                font-size: 13px; border-bottom: 1px solid transparent; }
+  .notice-bar[hidden] { display: none; }
+  .notice-bar.lvl-info { background: #eff6ff; color: #1e40af; border-bottom-color: #bfdbfe; }
+  .notice-bar.lvl-warn { background: #fef3c7; color: #92400e; border-bottom-color: #fde68a; }
+  .notice-bar.lvl-crit { background: #fee2e2; color: #991b1b; border-bottom-color: #fecaca; }
+  .notice-bar .track { display: inline-block; padding-left: 100%; will-change: transform;
+                       animation-name: notice-scroll; animation-timing-function: linear;
+                       animation-iteration-count: 1; animation-fill-mode: forwards; }
+  @keyframes notice-scroll { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+
   /* Tab nav */
   nav.tabs { display: flex; gap: 2px; padding: 0 14px; background: #fff; border-bottom: 1px solid var(--line); }
   nav.tabs button { border: none; background: none; padding: 11px 16px; font-size: 13.5px;
@@ -230,6 +242,7 @@
     <option value="ko">한국어</option>
   </select>
 </header>
+<div id="notice-bar" class="notice-bar" hidden aria-live="polite"></div>
 <nav class="tabs">
   <button data-tab="intro" data-i18n="nav.intro" onclick="showTab('intro')">Intro</button>
   <button data-tab="summary" data-i18n="nav.summary" onclick="showTab('summary')">Domain Summary</button>

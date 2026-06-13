@@ -27,6 +27,14 @@ _REPO = "rawdev/MemoryWeft"
 _RELEASES_API = f"https://api.github.com/repos/{_REPO}/releases/latest"
 _RELEASES_PAGE = f"https://github.com/{_REPO}/releases/latest"
 
+# Single "important notice" feed (the latest one only). Hosted on the project
+# site; the Manager surfaces it as a one-pass marquee on launch. Proxied
+# server-side (not fetched from the browser) to sidestep CORS and the desktop
+# file:// bridge's same-origin fetch routing.
+_NOTICE_URL = "https://onminimum.com/notice/mw/important.json"
+_NOTICE_TTL = 900.0      # 15 min — notice changes rarely; this caps round-trips
+_notice_cache: dict[str, Any] = {"ts": 0.0, "data": None}
+
 # GitHub's unauthenticated API allows 60 req/h per IP; a long cache keeps us well
 # clear and avoids a network round-trip on every appbar load.
 _CACHE_TTL = 6 * 3600.0
@@ -114,3 +122,31 @@ def app_version() -> dict[str, Any]:
         "release_name": (latest or {}).get("name"),
         "checked": latest is not None,
     }
+
+
+@router.get("/app/important-notice")
+def important_notice() -> dict[str, Any]:
+    """Best-effort proxy for the latest important notice.
+
+    Returns ``{"notice": <json|null>}``. The remote feed is a single object the
+    site owner controls — shape (all optional except text):
+    ``{"id", "date", "level": "info|warn|critical", "text": {"ko", "en"}}``.
+    Cached + short timeout so the appbar never blocks; any failure degrades to
+    the last cached value (or null) and is never raised.
+    """
+    now = time.time()
+    cached = _notice_cache.get("data")
+    if cached is not None and now - _notice_cache["ts"] < _NOTICE_TTL:
+        return {"notice": cached}
+    try:
+        r = httpx.get(_NOTICE_URL, timeout=3.0)
+        r.raise_for_status()
+        data = r.json()
+        if not isinstance(data, dict):
+            data = None
+        _notice_cache.update(ts=now, data=data)
+        return {"notice": data}
+    except Exception as exc:  # noqa: BLE001 — notice is optional
+        logger.debug("important-notice fetch failed: %s", exc)
+        _notice_cache["ts"] = now      # don't re-pay the timeout on a flaky net
+        return {"notice": cached}
