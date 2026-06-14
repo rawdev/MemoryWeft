@@ -30,6 +30,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _ph(conn: Any) -> str:
+    """SQL placeholder for the connection's backend — psycopg2 → ``%s``,
+    sqlite3 → ``?``. Canonical detector (see ``web.routes._sql._is_pg``)."""
+    return "%s" if "psycopg2" in type(conn).__module__.lower() else "?"
+
+
 class EventInfluenceService:
     """Explicit manipulation of events.influence_score + review candidate hints."""
 
@@ -54,9 +60,10 @@ class EventInfluenceService:
         conn = getattr(self._db.graph, "_conn", None)
         if conn is None:
             raise RuntimeError("graph store does not expose _conn -- check backend")
+        ph = _ph(conn)
         cur = conn.cursor()
         cur.execute(
-            "SELECT influence_score FROM events WHERE id = ?", (event_id,),
+            f"SELECT influence_score FROM events WHERE id = {ph}", (event_id,),
         )
         row = cur.fetchone()
         if row is None:
@@ -64,16 +71,18 @@ class EventInfluenceService:
                 "event_id": event_id, "found": False,
                 "score_before": None, "score_after": None, "reason": reason,
             }
-        score_before = float(row[0]) if row[0] is not None else 1.0
+        # PG RealDictCursor → dict rows; SQLite → tuple/Row.
+        sb = row["influence_score"] if hasattr(row, "keys") else row[0]
+        score_before = float(sb) if sb is not None else 1.0
         score_after = float(score)
         cur.execute(
-            "UPDATE events SET influence_score = ? WHERE id = ?",
+            f"UPDATE events SET influence_score = {ph} WHERE id = {ph}",
             (score_after, event_id),
         )
         cur.execute(
-            "INSERT INTO events_audit "
-            "(event_id, score_before, score_after, reason) "
-            "VALUES (?, ?, ?, ?)",
+            f"INSERT INTO events_audit "
+            f"(event_id, score_before, score_after, reason) "
+            f"VALUES ({ph}, {ph}, {ph}, {ph})",
             (event_id, score_before, score_after, reason),
         )
         conn.commit()
@@ -104,6 +113,7 @@ class EventInfluenceService:
         if mconn is None:
             return []
         cur = mconn.cursor()
+        mph = _ph(mconn)
         params: list[Any] = []
         sql = (
             "SELECT s.domain, s.file_path, s.segment_key, s.event_id, s.status, "
@@ -114,7 +124,7 @@ class EventInfluenceService:
             "  WHERE s.event_id IS NOT NULL AND s.event_id != '' "
         )
         if domain:
-            sql += "    AND s.domain = ? "
+            sql += f"    AND s.domain = {mph} "
             params.append(domain)
         sql += "  ORDER BY s.domain, s.file_path, s.segment_key, s.id "
         cur.execute(sql, params)
@@ -139,17 +149,21 @@ class EventInfluenceService:
                 # enrich with influence_score
                 gconn = getattr(self._db.graph, "_conn", None)
                 if gconn is not None:
+                    gph = _ph(gconn)
                     gcur = gconn.cursor()
                     for m in members:
                         try:
                             gcur.execute(
-                                "SELECT influence_score FROM events WHERE id = ?",
+                                f"SELECT influence_score FROM events WHERE id = {gph}",
                                 (m["event_id"],),
                             )
                             erow = gcur.fetchone()
+                            ev = (
+                                erow["influence_score"] if hasattr(erow, "keys")
+                                else erow[0]
+                            ) if erow is not None else None
                             m["influence_score"] = (
-                                float(erow[0]) if erow is not None
-                                and erow[0] is not None else None
+                                float(ev) if ev is not None else None
                             )
                         except Exception as exc:  # noqa: BLE001
                             logger.warning(

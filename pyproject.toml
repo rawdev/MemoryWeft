@@ -1,6 +1,6 @@
 [project]
 name = "mweft"
-version = "0.1.43"
+version = "0.1.44"
 description = "Local-first graph memory for MCP — events as vector-bearing edges"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }

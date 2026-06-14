@@ -418,7 +418,9 @@ def remember_edit_tool(
             f"AND domain = {ph}",
             (*remove_entities, *remove_entities, event_domain),
         )
-        resolved_ids = [r[0] for r in cur.fetchall()]
+        resolved_ids = [
+            (r["id"] if hasattr(r, "keys") else r[0]) for r in cur.fetchall()
+        ]
 
         if resolved_ids:
             # 1a. Delete participated_in rows
@@ -445,7 +447,9 @@ def remember_edit_tool(
                 f"WHERE participated_in.entity_id = entities.id)",
                 tuple(resolved_ids),
             )
-            orphans = [r[0] for r in cur.fetchall()]
+            orphans = [
+                (r["id"] if hasattr(r, "keys") else r[0]) for r in cur.fetchall()
+            ]
             if orphans:
                 ph_orphans = ", ".join([ph] * len(orphans))
                 # SQLite: deprecated INTEGER, Postgres: BOOLEAN
@@ -480,7 +484,9 @@ def remember_edit_tool(
                 f"AND {e_live}",
                 (event_id, entity_id),
             )
-            other_ids = [r[0] for r in cur.fetchall()]
+            other_ids = [
+                (r["id"] if hasattr(r, "keys") else r[0]) for r in cur.fetchall()
+            ]
 
             graph.link_participated_in(entity_id=entity_id, event_id=event_id)
             for other_id in other_ids:
@@ -496,7 +502,11 @@ def remember_edit_tool(
         (event_id,),
     )
     now_linked = [
-        {"entity_id": r[0], "name": r[1], "type": r[2]}
+        {
+            "entity_id": (r["id"] if hasattr(r, "keys") else r[0]),
+            "name": (r["name"] if hasattr(r, "keys") else r[1]),
+            "type": (r["type"] if hasattr(r, "keys") else r[2]),
+        }
         for r in cur.fetchall()
     ]
 

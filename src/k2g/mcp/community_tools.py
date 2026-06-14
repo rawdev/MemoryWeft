@@ -57,9 +57,15 @@ def _event_tag_crosstab(graph: Any, run_id: str) -> list[tuple]:
     cur = graph._conn.cursor()
     try:
         cur.execute(sql, (run_id,))
-        return [
-            (int(r[0]), r[1], r[2], r[3], int(r[4])) for r in cur.fetchall()
-        ]
+        # PG RealDictCursor → dict rows (keyed by column); SQLite → tuples.
+        out: list[tuple] = []
+        for r in cur.fetchall():
+            if hasattr(r, "keys"):
+                out.append((int(r["community_id"]), r["group_id"], r["name"],
+                            r["source"], int(r["n"])))
+            else:
+                out.append((int(r[0]), r[1], r[2], r[3], int(r[4])))
+        return out
     finally:
         cur.close()
 
