@@ -73,21 +73,32 @@ group/tag structure as `mweft_remember`.
 ## 4. CLI execution
 
 ```bash
-k2g-ingest-manifest path/to/ingest.manifest.json --domain <MWeft 저장 domain>
-# remove the temp manifest after ingest:
-k2g-ingest-manifest path/to/ingest.manifest.json --domain <domain> --remove-after
+k2g-ingest-manifest path/to/ingest.manifest.json --remove-after
 # re-ingest an updated document — changed items only (manifest needs file_path):
-k2g-ingest-manifest path/to/ingest.manifest.json --domain <domain> --incremental
+k2g-ingest-manifest path/to/ingest.manifest.json --remove-after --incremental
 ```
 
-> **Always pass `--domain`** with the MCP's configured write domain — the same
-> domain MWeft saves to (the active project's domain; visible in any
-> `mweft_search` result's `searched_scope`, or via `mweft_sql_query`, and the
-> same value you pass to `mweft_auto_tag_summarize`). This CLI runs as a
-> **subprocess that does NOT inherit the MCP server's env**, so without `--domain`
-> the domain falls back to `ai_memory` and the document lands in the wrong store.
-> (`--domain` is a single domain and overrides env; the manifest's own field is
-> still ignored.)
+> **You normally don't pass the backend/domain at all.** This CLI runs as a
+> subprocess that does NOT inherit the MCP server's env, so it resolves the
+> project's config itself, by the manifest's directory:
+> 1. **K2G project registry** (`~/.mweft/mweft_manager.json`, keyed by project
+>    dir) — the authoritative, client-agnostic source. Walks up from the manifest
+>    dir to find the matching project and applies its backend (SQLite *or*
+>    Postgres DSN), `DATA_DIR`, and write domain — identical to the MCP server.
+> 2. **`.mcp.json`** (client MCP config) — fallback when the project isn't in the
+>    registry.
+>
+> So just run it from (or with the manifest under) the project folder. Overrides,
+> only when needed (project not registered, or to force a target):
+> - `--mcp-config <path>` — load a specific client `.mcp.json`'s `mweft` env.
+> - `--domain <domain>` — write domain (`K2G_USER_MEMORY_SAVE_DOMAIN`).
+> - `--data-dir <dir>` — SQLite project data dir (holds `k2g_all_in_one.db` /
+>   `content_store.db` / `objects/`). Irrelevant for Postgres projects (the DSN
+>   decides). `--no-mcp-config` disables the `.mcp.json` fallback.
+>
+> If neither auto-resolution nor an override applies, the backend falls back to a
+> new local SQLite under `./data` (cwd) — almost always the wrong place, so make
+> sure the project is registered or pass an override.
 
 > **If `k2g-ingest-manifest` / `k2g-manifest-check` is "command not found"**:
 > these are console scripts inside the **mweft bundle's venv**, which the shell's
@@ -115,9 +126,10 @@ conversation-memory defaults. Passing `--tag` switches to **curated mode**:
 
 ```bash
 k2g-ingest-manifest docs.manifest.json \
-  --domain <MWeft 저장 domain> \       # MCP's write domain (always pass — §4)
   --working-folder project_docs \      # docs-only root (avoid polluting the conversational ai_memory)
   --tag ProjectX --tag Design          # user-confirmed tags (repeatable)
+# backend/domain auto-resolve from the project registry (§4); add
+# --domain/--data-dir/--mcp-config only to override.
 ```
 
 How curated mode differs:
@@ -188,7 +200,75 @@ k2g-manifest-check --source path/to/original --file-path docs/original.md
 5. **Produce `{content, summary, entities}` per chunk** — summary only in
    `summary`; keep the original text in `content`.
 6. **Incrementally append the manifest** — write to the file cumulatively. When
-   fully written, set `complete:true`.
+   fully written, set `complete:true`. **For large inputs, prefer the
+   script-based, compaction-safe method (§7) instead of authoring the manifest
+   inline.**
 7. **Run the CLI** (§4) — directly via shell. Verify success.
 8. **Verify/clean up** — confirm the success output, remove the temp manifest
    with `--remove-after`.
+
+---
+
+## 7. Compaction-safe authoring (recommended for large files/folders)
+
+Authoring the manifest **inline** — reading the whole document into context and
+emitting `content` + `summary` together as one big JSON — is fragile on long
+inputs: context fills, the agent **compacts** (lossy), and the **verbatim
+`content` can silently drift** from the source. The §5 size guards do not catch
+an altered character. So keep the **original text out of the LLM context** and
+author in **three stages**, where only the small middle stage is AI work:
+
+1. **chunk** *(mechanical, no LLM)* — a small script reads the source **from
+   disk** and slices it on semantic boundaries, writing one `chunks/<id>.txt`
+   per chunk (verbatim) plus an `index.json` listing the ids in order. The
+   boundary logic is **source-specific** — write it per corpus (Wikipedia
+   sections ≠ book chapters ≠ code files). This step never loads content into the
+   model.
+2. **author** *(AI, small output)* — for each chunk, read `<id>.txt` and write
+   `<id>.ann.json` = `{"summary", "entities", "tag"?}`. This is the *only* stage
+   that sees content, and its output is **small** (summary ≤ 500). Even if you
+   compact between chunks, the verbatim `.txt` on disk is untouched. Keep only
+   entities that appear verbatim in that chunk (no hallucination, §5).
+3. **assemble** *(mechanical, no LLM)* — merge `<id>.txt` + `<id>.ann.json` into
+   the manifest with the **shipped CLI**; `content` is copied **byte-for-byte
+   from disk**, never re-generated:
+   ```bash
+   k2g-manifest-assemble ./data/chunks -o ./ingest.manifest.json --tag <tag>
+   k2g-ingest-manifest   ./ingest.manifest.json --remove-after
+   ```
+   `k2g-manifest-assemble` orders by `index.json` (or sorted `*.txt`), skips
+   chunks lacking an `.ann.json`, validates the §5 guards, and writes
+   `complete:true`. It makes **zero LLM/DB calls**, so it needs no project config
+   (the backend/domain are resolved by `k2g-ingest-manifest`, §4). Useful flags:
+   `--source <enum>` · `--prev-event-id <id>` (chain batches) ·
+   `--working-folder <wf>` · `--file-path <fp>` (re-ingest key).
+
+Minimal chunk script (adapt the boundary to your source — semantic > size):
+```python
+import json, re
+from pathlib import Path
+src = Path("data/source.md").read_text(encoding="utf-8")
+out = Path("data/chunks"); out.mkdir(parents=True, exist_ok=True)
+paras, cur, size, chunks = re.split(r"\n{2,}", src), [], 0, []
+for p in paras:                       # pack paragraphs up to a soft cap (< 50000)
+    if cur and size + len(p) > 38000:
+        chunks.append("\n\n".join(cur)); cur, size = [], 0
+    cur.append(p); size += len(p) + 2
+if cur: chunks.append("\n\n".join(cur))
+index = []
+for i, c in enumerate(chunks, 1):
+    cid = f"doc__{i:02d}"; (out / f"{cid}.txt").write_text(c, encoding="utf-8")
+    index.append({"id": cid})
+(out / "index.json").write_text(json.dumps(index), encoding="utf-8")
+```
+Then *you* (the AI) read each `data/chunks/doc__NN.txt` and write
+`data/chunks/doc__NN.ann.json` — summary + verbatim-grounded entities only — and
+run `k2g-manifest-assemble`. (A worked two-corpus example pipeline — fetch →
+chunk → author → assemble — ships under `asset/mweft_sample/scripts/` in the K2G
+source repo; those scripts are **data-specific samples to learn the pattern
+from**, not reusable as-is.)
+
+**When to skip §7**: a handful of small chunks that fit comfortably in one
+context without compacting — inline authoring (§6) is fine. Reach for the
+three-stage method whenever the input is large enough that you would compact
+mid-authoring.

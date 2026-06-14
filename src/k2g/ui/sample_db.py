@@ -1,9 +1,11 @@
 """First-run sample project — seed a ready-made demo DB so a fresh install
 opens with explorable data instead of an empty "create a database" prompt.
 
-The sample is a single SQLite all-in-one DB (``k2g_all_in_one.db``, domain
-``sample_work``) shipped under ``asset/mweft_sample/``. On the bootstrap first
-run (no last-active project) the desktop launcher copies it into the bootstrap
+The sample is a SQLite project snapshot shipped under ``asset/mweft_sample/`` —
+the all-in-one graph DB (``k2g_all_in_one.db``) plus its sibling stores
+(``content_store.db`` holding the in-DB original content, ``build_manifest.db``
+the source-lineage hashes). On the bootstrap first run (no last-active project)
+the desktop launcher copies every ``*.db`` in that dir into the bootstrap
 project folder and configures that registry entry to point at it. A marker file
 (``.mweft_sample.json``) records what was seeded so the Manager can show a
 one-time "sample created" intro popup, then never again.
@@ -131,7 +133,20 @@ def seed_sample_project(project_dir: Path | str) -> dict[str, Any] | None:
         return None
     try:
         project_dir.mkdir(parents=True, exist_ok=True)
+        # Primary all-in-one DB → canonical name (the asset may be named
+        # differently when pointed at via MWEFT_SAMPLE_DB).
         shutil.copy2(asset, target)
+        # Plus the sibling stores by their real names — the full project snapshot:
+        # content_store.db (in-DB original content; without it the sample's event
+        # detail shows summaries but no original text) and build_manifest.db
+        # (source-lineage hashes). Per-file non-destructive guard.
+        for db_file in sorted(asset.parent.glob("*.db")):
+            if db_file.name == asset.name:
+                continue  # already copied as the canonical primary
+            dst = project_dir / db_file.name
+            if dst.exists():
+                continue
+            shutil.copy2(db_file, dst)
     except OSError as exc:
         logger.warning("sample seed copy failed (%s -> %s): %s", asset, target, exc)
         return None

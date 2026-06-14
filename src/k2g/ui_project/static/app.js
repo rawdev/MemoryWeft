@@ -694,7 +694,10 @@ async function _anExploreSelectCommunity(communityId) {
   }
   if (evBody) evBody.innerHTML = events.map(e => {
     const ts = String(e.timestamp || '').replace('T', ' ').slice(0, 16);
-    return `<div class="sx-row">
+    const eid = escapeHtml(e.id);
+    return `<div class="sx-row" style="cursor:pointer"
+        title="${t('an.tip.eventDetail')}"
+        onclick="showEventDetailModal('${eid}')">
       <span class="nm">${escapeHtml(e.summary || e.id)}
         <div class="meta">${escapeHtml(ts)}</div></span>
       <span class="n" title="${t('an.exp.entityCountTitle')}">👤${e.entity_count}</span>
@@ -1299,8 +1302,14 @@ async function loadCommunityDetail(cid, kind) {
   }
   slot.innerHTML = `<div class="muted">${t('an.comm.loadingMembers')}</div>`;
   try {
+    // Pass the active domain so the member list resolves the SAME per-domain run
+    // as the cluster list. Without it the backend falls back to the cross-domain
+    // (NULL) run, where community #cid can belong to a different domain (e.g. K2G
+    // members under a 'sample' cluster when both share one DB).
+    const d = domain();
     const r = await fetch(
-      `/api/auto-tags/${cid}?kind=${encodeURIComponent(kind)}&max_members=50`);
+      `/api/auto-tags/${cid}?kind=${encodeURIComponent(kind)}&max_members=50`
+      + (d ? `&domain=${encodeURIComponent(d)}` : ''));
     const data = await r.json();
     if (data.error) {
       slot.innerHTML = `<div style="color:red">${escapeHtml(data.error)}</div>`;
@@ -1428,6 +1437,59 @@ function hideEgoModal() {
   if (m) m.style.display = 'none';
 }
 
+// --- "전체 보기" popup: full summary + original text, stacked above the
+//     event detail modal (higher z-index so the detail stays underneath). ---
+function _ensureEvdFullModal() {
+  let m = document.getElementById('evd-full-modal');
+  if (m) return m;
+  m = document.createElement('div');
+  m.id = 'evd-full-modal';
+  m.style.cssText = 'display:none; position:fixed; top:0; left:0; right:0; bottom:0;'
+    + 'background:rgba(0,0,0,0.5); z-index:110; align-items:center; justify-content:center;';
+  m.onclick = (e) => { if (e.target === m) hideEvdFullModal(); };
+  m.innerHTML = `
+    <div style="background:#fff; border-radius:8px; padding:16px; max-width:880px; width:92vw;
+                max-height:92vh; overflow:auto; box-shadow:0 12px 32px rgba(0,0,0,0.35);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h3 id="evd-full-title" style="margin:0;"></h3>
+        <button onclick="hideEvdFullModal()" style="font-size:16px;">✕</button>
+      </div>
+      <div id="evd-full-body"></div>
+    </div>`;
+  document.body.appendChild(m);
+  return m;
+}
+
+function hideEvdFullModal() {
+  const m = document.getElementById('evd-full-modal');
+  if (m) m.style.display = 'none';
+}
+
+function showEvdFullModal() {
+  const d = _evdData || {};
+  const summary = d.summary || '';
+  const original = d.original_text || '';
+  const m = _ensureEvdFullModal();
+  const title = document.getElementById('evd-full-title');
+  if (title) title.textContent = t('an.evd.fullTitle');
+  const summarySection = `
+    <div style="margin-bottom:14px;">
+      <div class="sx-col-h" style="margin-bottom:4px;">${t('an.evd.summary')}</div>
+      ${summary
+        ? `<div style="line-height:1.6; white-space:pre-wrap;">${escapeHtml(summary)}</div>`
+        : `<div class="muted">${t('an.evd.noSummary')}</div>`}
+    </div>`;
+  const originalSection = original ? `
+    <div>
+      <div class="sx-col-h" style="margin-bottom:4px;">${t('an.evd.original', { len: original.length })}</div>
+      <div style="white-space:pre-wrap; font-family:ui-monospace,Menlo,monospace; font-size:12px;
+                  padding:10px; background:#f8fafc; border:1px solid #e5e7eb; border-radius:4px;">${escapeHtml(original)}</div>
+    </div>` : '';
+  const body = document.getElementById('evd-full-body');
+  if (body) body.innerHTML = summarySection + originalSection;
+  m.style.display = 'flex';
+}
+
 async function showEgoModal(kind, nodeId) {
   const m = _ensureEgoModal();
   m.style.display = 'flex';
@@ -1473,7 +1535,12 @@ async function showEventDetailModal(eventId) {
   }
 }
 
+// Holds the most recently rendered event detail so the "전체 보기" popup can
+// load the full summary + original text without re-fetching.
+let _evdData = null;
+
 function _renderEventDetail(data) {
+  _evdData = data;
   const ev = data.event || {};
   const summary = data.summary || '';
   const original = data.original_text || '';
@@ -1490,12 +1557,24 @@ function _renderEventDetail(data) {
     ID <code>${escapeHtml(ev.id || '')}</code>${tsBits.length ? ' · ' + tsBits.join(' · ') : ''}
   </div>`;
 
-  const summaryBlock = summary
-    ? `<div style="margin-bottom:12px;">
-        <div class="sx-col-h">${t('an.evd.summary')}</div>
-        <div style="line-height:1.55;">${escapeHtml(summary)}</div>
-      </div>`
-    : `<div class="muted" style="margin-bottom:12px;">${t('an.evd.noSummary')}</div>`;
+  // "전체 보기" button — opens a stacked popup with the full summary + original
+  // text. Enabled only when the original text (contents) exists.
+  const _fullBtnBase = 'font-size:11px; padding:2px 10px; border:1px solid #cbd5e1;'
+    + ' border-radius:4px; background:#f8fafc;';
+  const fullBtn = original
+    ? `<button onclick="showEvdFullModal()"
+               style="${_fullBtnBase} cursor:pointer;">${t('an.evd.viewFull')}</button>`
+    : `<button disabled title="${t('an.evd.viewFullEmpty')}"
+               style="${_fullBtnBase} opacity:0.45; cursor:not-allowed;">${t('an.evd.viewFull')}</button>`;
+  const summaryBlock = `<div style="margin-bottom:12px;">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+        <span class="sx-col-h">${t('an.evd.summary')}</span>
+        ${fullBtn}
+      </div>
+      ${summary
+        ? `<div style="line-height:1.55;">${escapeHtml(summary)}</div>`
+        : `<div class="muted">${t('an.evd.noSummary')}</div>`}
+    </div>`;
 
   const originalBlock = original ? `
     <div style="margin-bottom:12px;">

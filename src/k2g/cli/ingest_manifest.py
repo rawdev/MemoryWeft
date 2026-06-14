@@ -38,6 +38,53 @@ from pathlib import Path
 logger = logging.getLogger("k2g.cli.ingest_manifest")
 
 
+# Backend-routing env vars: their presence flips graph/vector/content stores
+# between sqlite and Postgres (K2G_POSTGRES_DSN auto-selects Postgres). A resolved
+# project (registry entry / .mcp.json) must decide the backend AUTHORITATIVELY, so
+# when we apply one we CLEAR any of these it does not itself set — otherwise a
+# stale K2G_POSTGRES_DSN lingering in the shell/session silently overrides a sqlite
+# entry and the build lands in Postgres (DATA_DIR set but ignored).
+_BACKEND_ROUTING_KEYS = (
+    "K2G_POSTGRES_DSN",
+    "GRAPH_DB_PROVIDER",
+    "VECTOR_STORE_PROVIDER",
+    "CONTENT_STORE_MODE",
+)
+
+
+class _AmbiguousRegistry(Exception):
+    """Raised when >1 registry project maps to the same directory.
+
+    The backend (sqlite vs Postgres) can't be guessed, so resolution refuses
+    instead of silently picking one. ``main`` turns this into a hard error unless
+    an explicit override (--data-dir / --mcp-config) disambiguates.
+    """
+
+    def __init__(self, directory: str, slugs: list[str]) -> None:
+        super().__init__(f"{len(slugs)} projects for {directory}: {slugs}")
+        self.directory = directory
+        self.slugs = slugs
+
+
+def _apply_resolved_env(env: dict) -> None:
+    """Apply a resolved project env to os.environ, authoritative for the backend.
+
+    Routing keys (``_BACKEND_ROUTING_KEYS``) are set when the entry provides a
+    non-empty value, else CLEARED (so a stale value can't flip the backend).
+    Non-routing keys are set when provided (empty/None skipped).
+    """
+    import os
+    provided = {k: v for k, v in env.items() if v is not None and str(v) != ""}
+    for k in _BACKEND_ROUTING_KEYS:
+        if k in provided:
+            os.environ[k] = str(provided[k])
+        else:
+            os.environ.pop(k, None)
+    for k, v in provided.items():
+        if k not in _BACKEND_ROUTING_KEYS:
+            os.environ[str(k)] = str(v)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="k2g-ingest-manifest",
@@ -50,10 +97,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         "domain here when running as a subprocess that doesn't inherit "
                         "that env (otherwise it falls back to 'ai_memory'). The "
                         "manifest's own domain field is still ignored.")
-    p.add_argument("--session-id", default=None,
-                   help="Staging session ID (default: timestamp). Used for staging isolation.")
-    p.add_argument("--stage-root", default="",
-                   help="Staging root override (default: from settings).")
+    p.add_argument("--data-dir", default=None, metavar="DIR",
+                   help="Target data directory (the project root that holds "
+                        "k2g_all_in_one.db / content_store.db / objects). Overrides "
+                        "the DATA_DIR env. Pass the MCP's configured data dir here when "
+                        "running as a subprocess that doesn't inherit that env — "
+                        "otherwise data_dir falls back to './data' relative to the "
+                        "current working directory, writing the build to the wrong place "
+                        "(e.g. a temp folder the Manager never reads).")
+    p.add_argument("--mcp-config", default=None, metavar="PATH",
+                   help="Path to the .mcp.json that configures the mweft MCP server. "
+                        "Its `mcpServers.mweft.env` block (DATA_DIR / K2G_POSTGRES_DSN / "
+                        "CONTENT_STORE_MODE / K2G_USER_MEMORY_SAVE_DOMAIN / EMBEDDING_* …) "
+                        "is loaded into the environment so this CLI writes to the SAME "
+                        "backend (SQLite file OR Postgres DSN) and domain as the MCP — no "
+                        "need to pass --data-dir/--domain separately. If omitted, the CLI "
+                        "auto-discovers a .mcp.json upward from the manifest dir / cwd. "
+                        "Use --no-mcp-config to disable. Explicit --domain/--data-dir still override.")
+    p.add_argument("--no-mcp-config", action="store_true",
+                   help="Disable .mcp.json auto-discovery/loading (use only env + flags).")
+    # Internal staging mechanics — kept functional for the Manager / scripts that
+    # drive staging programmatically, but hidden from --help so an AI agent does
+    # not try to "resume" a leftover build_stage by hand (a fragile recovery path
+    # that misreads a stale staging marker as "load not done").
+    p.add_argument("--session-id", default=None, help=argparse.SUPPRESS)
+    p.add_argument("--stage-root", default="", help=argparse.SUPPRESS)
     p.add_argument("--remove-after", action="store_true",
                    help="Delete the manifest file after a successful load.")
     p.add_argument("--incremental", action="store_true",
@@ -82,6 +150,119 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--log-level", default="INFO",
                    choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return p.parse_args(argv)
+
+
+def _load_registry_env(start: Path) -> tuple[str, dict] | None:
+    """Resolve config from K2G's client-agnostic project registry.
+
+    `~/.mweft/mweft_manager.json` maps each project's directory to its backend
+    config (DATA_DIR / Postgres DSN / domain / embedding). Unlike a client's MCP
+    config (`.mcp.json` for Claude, `.cursor/mcp.json` for Cursor, …) whose
+    location varies per AI, this registry is K2G's own, so the CLI can resolve
+    the SAME backend/domain the MCP uses by project directory alone — no need to
+    know which AI client launched it.
+
+    Walks up from ``start`` matching each ancestor against the registry; on a hit
+    applies ``entry_env_dict`` (the single source of truth that also generates the
+    MCP env) authoritatively to os.environ (clearing stale backend-routing vars).
+    If more than one project is registered for the same directory the resolution is
+    ambiguous (the backends may differ) — raise ``_AmbiguousRegistry`` rather than
+    silently routing the build to the wrong backend. Returns (slug, applied_env)
+    or None.
+    """
+    try:
+        from k2g.ui.project_registry import entry_env_dict, list_projects
+    except Exception:  # noqa: BLE001 — registry module optional
+        return None
+    try:
+        projects = list(list_projects())
+    except Exception:  # noqa: BLE001
+        return None
+
+    def _matches(d: Path) -> list:
+        try:
+            target = str(d.resolve())
+        except OSError:
+            target = str(d)
+        out = []
+        for e in projects:
+            for cand in (getattr(e, "project_dir", None), getattr(e, "db_dir", None)):
+                if not cand:
+                    continue
+                try:
+                    same = str(Path(cand).resolve()) == target
+                except OSError:
+                    same = str(cand) == target
+                if same:
+                    out.append(e)
+                    break
+        return out
+
+    cur = start.resolve()
+    for d in (cur, *cur.parents):
+        ms = _matches(d)
+        if not ms:
+            continue
+        if len(ms) > 1:
+            # Ambiguous: the entries may differ in backend (sqlite vs Postgres),
+            # so picking one silently routes the build to the wrong store. Refuse
+            # — main() decides whether an explicit override rescues it.
+            slugs = [getattr(m, "slug", "?") or "?" for m in ms]
+            raise _AmbiguousRegistry(str(d), slugs)
+        entry = ms[0]
+        env = entry_env_dict(entry)
+        _apply_resolved_env(env)  # authoritative — clears stale backend-routing vars
+        return (getattr(entry, "slug", "") or "", env)
+    return None
+
+
+def _find_mcp_config(start: Path) -> Path | None:
+    """Walk up from ``start`` looking for a ``.mcp.json``. Returns the first hit."""
+    cur = start.resolve()
+    for d in (cur, *cur.parents):
+        cand = d / ".mcp.json"
+        if cand.is_file():
+            return cand
+    return None
+
+
+def _load_mcp_env(config_path: Path) -> tuple[str, dict]:
+    """Load the mweft MCP server's ``env`` block from a .mcp.json into os.environ.
+
+    The CLI runs as a subprocess that does not inherit the MCP server's env, so
+    everything (DATA_DIR / DSN / CONTENT_STORE_MODE / domain / embedding) silently
+    falls back to defaults (sqlite + ./data). Loading the same .mcp.json that
+    configures the connected MCP makes this CLI write to the *same* backend and
+    domain — the single source of truth. .mcp.json is authoritative here, so its
+    values override the (usually empty) shell env; explicit --domain/--data-dir
+    flags are applied afterwards and still win.
+
+    Returns (server_name, applied_env). Raises on unreadable/invalid JSON.
+    """
+    import json
+
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    servers = data.get("mcpServers") or {}
+    if not isinstance(servers, dict) or not servers:
+        return ("", {})
+    # Prefer a server literally named "mweft"; else one whose command looks like
+    # the k2g/mweft MCP; else the first entry.
+    name = None
+    if "mweft" in servers:
+        name = "mweft"
+    else:
+        for n, spec in servers.items():
+            cmd = str((spec or {}).get("command", "")).lower()
+            if "k2g-mcp" in cmd or "mweft" in cmd:
+                name = n
+                break
+        if name is None:
+            name = next(iter(servers))
+    env = ((servers.get(name) or {}).get("env")) or {}
+    if not isinstance(env, dict):
+        return (name, {})
+    _apply_resolved_env(env)  # authoritative — clears stale backend-routing vars
+    return (name, env)
 
 
 def _resolve_domain(args_domain: str | None, settings) -> str:
@@ -216,6 +397,74 @@ def main(argv: list[str] | None = None) -> int:
     from k2g.staging import StagingLoader, StagingWriter
 
     session_id = args.session_id or f"manifest_{time.strftime('%Y%m%d_%H%M%S')}"
+
+    import os as _os
+    from k2g.core.config import get_settings as _gs
+
+    # 1) Resolve the project's backend/domain config — the single source of truth.
+    # A subprocess does NOT inherit the MCP server's env, so without this the
+    # backend (SQLite vs PG), DATA_DIR, domain and embedding silently fall back to
+    # defaults (sqlite + ./data). Resolution order:
+    #   a) K2G's client-agnostic project registry (~/.mweft/mweft_manager.json),
+    #      keyed by project dir — works regardless of which AI client launched us.
+    #   b) the client's .mcp.json (explicit --mcp-config or auto-discovered) as a
+    #      fallback for projects not in the registry.
+    # Explicit --domain / --data-dir below still override either.
+    if not (args.mcp_config or args.no_mcp_config):
+        try:
+            reg = _load_registry_env(args.manifest.parent) or _load_registry_env(Path.cwd())
+        except _AmbiguousRegistry as exc:
+            if args.data_dir and args.data_dir.strip():
+                # An explicit --data-dir rescues the ambiguity (forces sqlite below).
+                print(f"[warn] {len(exc.slugs)} projects registered for "
+                      f"{exc.directory}: {exc.slugs} — ignoring the registry; "
+                      f"using your --data-dir override.", file=sys.stderr)
+                reg = None
+            else:
+                print(f"[error] {len(exc.slugs)} projects registered for "
+                      f"{exc.directory}: {exc.slugs}. Refusing to guess the backend "
+                      f"(sqlite vs Postgres). Disambiguate with --data-dir <dir> "
+                      f"(sqlite) or --mcp-config <path>, or remove the duplicate "
+                      f"entry in ~/.mweft/mweft_manager.json.", file=sys.stderr)
+                return 2
+        if reg is not None:
+            slug, applied = reg
+            print(f"[manifest] loaded project registry env "
+                  f"(slug={slug or '?'}, keys={sorted(applied)})")
+    if not args.no_mcp_config:
+        cfg_path = Path(args.mcp_config) if args.mcp_config else (
+            _find_mcp_config(args.manifest.parent) or _find_mcp_config(Path.cwd())
+        )
+        # Only fall back to .mcp.json when the registry did not already anchor us.
+        if cfg_path and cfg_path.is_file() and not _os.environ.get("DATA_DIR") \
+                and not _os.environ.get("K2G_POSTGRES_DSN"):
+            try:
+                name, applied = _load_mcp_env(cfg_path)
+                if applied:
+                    print(f"[manifest] loaded MCP env from {cfg_path} "
+                          f"(server={name or '?'}, keys={sorted(applied)})")
+            except Exception as exc:  # noqa: BLE001 — bad config shouldn't be silent
+                print(f"[warn] failed to load --mcp-config {cfg_path}: {exc}",
+                      file=sys.stderr)
+        elif args.mcp_config and not (cfg_path and cfg_path.is_file()):
+            print(f"[error] --mcp-config not found: {args.mcp_config}", file=sys.stderr)
+            return 2
+
+    # 2) --data-dir override — applied AFTER the MCP env so an explicit flag wins.
+    # Resolves DATA_DIR and all derived sub-paths (k2g_all_in_one.db /
+    # content_store.db / objects) under the intended project root. --data-dir means
+    # "use a local SQLite project here", so force sqlite by clearing any
+    # backend-routing vars first (a stale K2G_POSTGRES_DSN would otherwise keep the
+    # build on Postgres and DATA_DIR would be silently ignored).
+    if args.data_dir and args.data_dir.strip():
+        for _k in _BACKEND_ROUTING_KEYS:
+            _os.environ.pop(_k, None)
+        _os.environ["DATA_DIR"] = _os.path.abspath(args.data_dir.strip())
+        print(f"[manifest] data_dir override={_os.environ['DATA_DIR']} (forcing sqlite)")
+
+    # Settings are cached (lru_cache) and build_dependencies() is the first call —
+    # clear so the env we just set (MCP config / --data-dir) is picked up.
+    _gs.cache_clear()
 
     deps = build_dependencies()
     db = deps.db

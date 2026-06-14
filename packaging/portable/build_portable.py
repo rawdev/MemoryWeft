@@ -188,14 +188,22 @@ def main() -> None:
     # 3c) bundle the first-run sample DB so a fresh install opens with explorable
     #     data + a one-time intro instead of a blank create-DB prompt. The
     #     launcher exports MWEFT_SAMPLE_DIR so k2g.ui.sample_db finds it.
-    sample_src = REPO / "asset" / "mweft_sample" / "k2g_all_in_one.db"
-    if sample_src.is_file():
+    sample_dir = REPO / "asset" / "mweft_sample"
+    sample_primary = sample_dir / "k2g_all_in_one.db"
+    if sample_primary.is_file():
         sample_dst = stage / "asset" / "mweft_sample"
         sample_dst.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(sample_src, sample_dst / sample_src.name)
-        print(f"[sample] bundled {sample_src} -> {sample_dst}")
+        # Bundle the full project snapshot — every *.db in the asset dir, not just
+        # the graph DB. content_store.db carries the in-DB original content (so the
+        # sample's event detail shows original text, not just summaries);
+        # build_manifest.db the source-lineage hashes.
+        bundled = []
+        for db_file in sorted(sample_dir.glob("*.db")):
+            shutil.copy2(db_file, sample_dst / db_file.name)
+            bundled.append(db_file.name)
+        print(f"[sample] bundled {bundled} -> {sample_dst}")
     else:
-        print(f"[sample] WARNING: {sample_src} missing — no first-run sample DB "
+        print(f"[sample] WARNING: {sample_primary} missing — no first-run sample DB "
               f"bundled (fresh installs open the blank create-DB flow instead). "
               f"Provide it locally, or via the `sample-data` release (see "
               f"packaging/how_to_package.md).")

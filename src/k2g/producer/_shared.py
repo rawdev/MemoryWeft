@@ -41,6 +41,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Original content at or below this size is stored INLINE in the DB
+# (content_store.inline_meta["content"]); larger payloads spill to object
+# storage to avoid bloating a single content_store row. Generous on purpose so
+# in practice virtually all chunk content lives in the DB (portable).
+_INLINE_CONTENT_MAX_CHARS = 1_000_000
+
 
 # ---------------------------------------------------------------------------
 # NER output validation -- Phase 1 lenient
@@ -401,14 +407,6 @@ def produce_ner_output(
             "source_id": source_id,
         })
 
-    # Object Storage
-    storage_uri = object_storage.put_text(
-        text=ner_output.content.data,
-        content_type=ner_output.content.content_type,
-        domain=domain,
-        hint=ner_output.event.summary[:32],
-    )
-
     # Content Store
     vector_id = new_vector_id()
     # Propagate validation_issues to content_store so that post-hoc
@@ -422,6 +420,26 @@ def produce_ner_output(
     }
     if validation_issues:
         content_inline_meta["ner_validation_issues"] = list(validation_issues)
+
+    # Original content is stored INLINE in the DB (content_store.inline_meta)
+    # so it travels with the database: portable when a SQLite project folder is
+    # moved, and reachable for a server-side Postgres deployment. The local
+    # object-storage backend writes absolute file:// paths that break on a move
+    # and are unreachable across machines (no cloud backend), so in-DB is the
+    # portable default. Pathologically large payloads still spill to object
+    # storage to avoid bloating a single content_store row.
+    # (See bugfix/postgres-portability.)
+    data = ner_output.content.data
+    if data is not None and len(data) <= _INLINE_CONTENT_MAX_CHARS:
+        content_inline_meta["content"] = data
+        storage_uri = f"inline://{vector_id}"
+    else:
+        storage_uri = object_storage.put_text(
+            text=data,
+            content_type=ner_output.content.content_type,
+            domain=domain,
+            hint=ner_output.event.summary[:32],
+        )
     content_id = content.save(
         domain=domain,
         vector_id=vector_id,

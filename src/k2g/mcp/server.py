@@ -432,10 +432,18 @@ def mweft_auto_tag_members(
     auto_tag_id: int,
     kind: str = "entity",
     run_id: str | None = None,
+    domain: str | None = None,
 ) -> dict[str, Any]:
-    """Return the full ranked member list for a single auto-tag."""
+    """Return the full ranked member list for a single auto-tag.
+
+    Pass ``domain`` (the active project's domain, same as ``mweft_auto_tag_list``)
+    so the members resolve the SAME per-domain Leiden run. Omitting it falls back
+    to the cross-domain (NULL) run, where an auto_tag_id can map to a different
+    domain's community (e.g. K2G members under a 'sample' auto-tag in a shared DB).
+    """
     return community_detail_tool(
         _get_deps(), community_id=auto_tag_id, kind=kind, run_id=run_id,
+        domain=domain,
     )
 
 

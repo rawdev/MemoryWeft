@@ -336,12 +336,20 @@ def community_detail_tool(
     community_id: int,
     kind: str = "entity",
     run_id: str | None = None,
+    domain: str | None = None,
     max_members: int = 50,
 ) -> dict[str, Any]:
-    """Full member list of one community (ranked by prominence)."""
+    """Full member list of one community (ranked by prominence).
+
+    ``domain`` must match the one used by ``community_list_tool`` so the detail
+    resolves the SAME per-domain run. Passing ``None`` here resolves the
+    cross-domain (NULL) run, where ``community_id`` can map to a different
+    domain's community (e.g. K2G members under a 'sample' cluster when both
+    domains share one physical DB).
+    """
     if kind not in _KIND:
         return {"error": f"kind must be 'entity' or 'event', got {kind!r}"}
-    rid = _resolve_run(deps, kind, None, run_id)
+    rid = _resolve_run(deps, kind, domain, run_id)
     if rid is None:
         return {"error": f"no completed {_KIND[kind]} run"}
     members = deps.db.graph.list_community_members(rid, kind)

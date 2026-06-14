@@ -68,11 +68,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip build
           python -m build --wheel
-      # First-run sample DB — not committed (it's a 16MB *.db, gitignored like the
-      # model). Fetch it from the pinned `sample-data` release so build_portable
-      # bundles it (it auto-detects asset/mweft_sample/k2g_all_in_one.db). Best-
-      # effort: if the release/asset is absent the bundle simply ships without a
-      # sample and fresh installs fall back to the blank create-DB flow.
+      # First-run sample DB — not committed (the *.db files are gitignored like the
+      # model). Fetch the full sample snapshot (k2g_all_in_one.db + content_store.db
+      # + build_manifest.db) from the pinned `sample-data` release so build_portable
+      # bundles them (it auto-detects every *.db under asset/mweft_sample/).
+      # content_store.db is required for the sample to show original event text.
+      # Best-effort: if the release/asset is absent the bundle simply ships without
+      # a sample and fresh installs fall back to the blank create-DB flow.
       - name: Get the first-run sample DB
         continue-on-error: true
         shell: bash
@@ -81,7 +83,7 @@ jobs:
         run: |
           mkdir -p asset/mweft_sample
           gh release download sample-data --repo "$GITHUB_REPOSITORY" \
-            --pattern k2g_all_in_one.db --dir asset/mweft_sample --clobber \
+            --pattern '*.db' --dir asset/mweft_sample --clobber \
             || echo "sample-data release/asset not found — bundling without the sample DB"
       - name: Build the portable zip (offline; bundles local wheel + model)
         run: >

@@ -125,16 +125,32 @@ embeds + links), landing in the same group/tag structure as `mw save`.
   set `"complete": true` only when fully written.
 - **Run** it yourself via shell:
   ```bash
-  k2g-ingest-manifest path/to/ingest.manifest.json --domain <save domain> --remove-after
+  k2g-ingest-manifest path/to/ingest.manifest.json --remove-after
   ```
-  **Always pass `--domain`** with MWeft's write domain (the active project's
-  domain — visible in any `mweft_search` result's `searched_scope`). This CLI is
-  a subprocess that does not inherit the MCP env, so without it the domain falls
-  back to `ai_memory` and the document lands in the wrong store.
+  **Backend/domain auto-resolve — you normally pass neither.** This CLI is a
+  subprocess that does not inherit the MCP env, so it resolves the project config
+  by the manifest's directory: first K2G's client-agnostic project registry
+  (`~/.mweft/mweft_manager.json`, keyed by project dir — applies SQLite/Postgres,
+  DATA_DIR and write domain exactly like the MCP), then the client's `.mcp.json`
+  as fallback. Overrides only when the project isn't registered or to force a
+  target: `--mcp-config <path>` / `--domain <domain>` / `--data-dir <dir>`
+  (`--data-dir` is SQLite-only; Postgres is decided by the DSN). If nothing
+  resolves, it falls back to a new local SQLite under `./data` (cwd) — usually
+  wrong, so ensure the project is registered or pass an override.
   All-or-nothing (one bad item rejects the batch); re-running is dedup-safe.
 - **External documents** (corpus with a different author): switch to *curated*
   mode — `--working-folder <docs-root> --tag <Label>` with a **user-confirmed**
   tag (don't invent it). Keeps doc provenance out of conversational memory.
+- **Large input → author compaction-safe.** Don't hold the whole document in
+  context and emit `content`+`summary` together — if you compact mid-authoring,
+  the verbatim `content` can drift. Instead keep the text on disk and work in
+  three stages: a small script slices the source into `chunks/<id>.txt` (no LLM);
+  you write `chunks/<id>.ann.json` (summary + entities only); then merge them
+  byte-exact with the shipped CLI — no LLM, no DB:
+  ```bash
+  k2g-manifest-assemble ./chunks -o ./ingest.manifest.json --tag <tag>
+  k2g-ingest-manifest   ./ingest.manifest.json --remove-after
+  ```
 - Limits: `items ≤ 2000`, `Σcontent ≤ ~5MB` — over that, split into per-batch
   manifests chained via `prev_event_id`.
 

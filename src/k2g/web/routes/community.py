@@ -812,10 +812,17 @@ def auto_tag_members(
     auto_tag_id: int,
     kind: str = Query("entity"),
     run_id: str | None = Query(None),
+    domain: str | None = Query(None),
     max_members: int = Query(50, ge=1, le=1000),
     db: Any = Depends(get_db_dep),
 ) -> dict:
-    """Full member list of one auto-tag (ranked by prominence)."""
+    """Full member list of one auto-tag (ranked by prominence).
+
+    ``domain`` must match the one passed to ``/auto-tags`` (list) so the members
+    resolve the SAME per-domain run. Without it the detail falls back to the
+    cross-domain (NULL) run and an auto_tag_id can resolve to a different
+    domain's community (e.g. K2G members under a 'sample' auto-tag in a shared DB).
+    """
     if kind not in _KINDS:
         return {"error": f"kind must be 'entity' or 'event', got {kind!r}"}
     from k2g.mcp.community_tools import community_detail_tool
@@ -823,6 +830,6 @@ def auto_tag_members(
     return sanitize(_rename_community_to_auto_tag(
         community_detail_tool(
             _shim(db), community_id=auto_tag_id, kind=kind,
-            run_id=run_id, max_members=max_members,
+            run_id=run_id, domain=domain, max_members=max_members,
         )
     ))

@@ -1368,16 +1368,23 @@ class PostgresGraphStore(ReconnectingConnMixin):
     ) -> int:
         if not assignments:
             return 0
+        from psycopg2.extras import execute_values
         rows = [(run_id, eid, int(cid)) for eid, cid in assignments]
         with self._conn.cursor() as cur:
-            cur.executemany(
+            # execute_values batches into multi-row INSERTs (~N/page_size
+            # round-trips) instead of psycopg2 executemany's one round-trip
+            # per row — essential over a remote DB (Neon) where each
+            # round-trip carries network latency.
+            execute_values(
+                cur,
                 """
                 INSERT INTO entity_community_assignment (run_id, entity_id, community_id)
-                VALUES (%s, %s, %s)
+                VALUES %s
                 ON CONFLICT (run_id, entity_id) DO UPDATE
                     SET community_id = EXCLUDED.community_id
                 """,
                 rows,
+                page_size=1000,
             )
         self._conn.commit()
         return len(rows)
@@ -1413,16 +1420,21 @@ class PostgresGraphStore(ReconnectingConnMixin):
     ) -> int:
         if not assignments:
             return 0
+        from psycopg2.extras import execute_values
         rows = [(run_id, eid, int(cid)) for eid, cid in assignments]
         with self._conn.cursor() as cur:
-            cur.executemany(
+            # execute_values: one multi-row INSERT per page vs. executemany's
+            # per-row round-trip — see upsert_entity_community_assignments.
+            execute_values(
+                cur,
                 """
                 INSERT INTO event_community_assignment (run_id, event_id, community_id)
-                VALUES (%s, %s, %s)
+                VALUES %s
                 ON CONFLICT (run_id, event_id) DO UPDATE
                     SET community_id = EXCLUDED.community_id
                 """,
                 rows,
+                page_size=1000,
             )
         self._conn.commit()
         return len(rows)

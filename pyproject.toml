@@ -1,6 +1,6 @@
 [project]
 name = "mweft"
-version = "0.1.44"
+version = "0.1.45"
 description = "Local-first graph memory for MCP — events as vector-bearing edges"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
@@ -73,6 +73,8 @@ mweft-init = "k2g.cli.init:main"                # Project init
 # LLM-free document ingestion (load documents into memory without the build pipeline)
 k2g-ingest-manifest = "k2g.cli.ingest_manifest:main"
 k2g-manifest-check = "k2g.cli.manifest_check:main"
+# Compaction-safe manifest assembly (merge chunk .txt + .ann.json, no LLM)
+k2g-manifest-assemble = "k2g.cli.assemble_manifest:main"
 # Data portability
 mweft-export = "k2g.portable.cli:export_main"
 mweft-import = "k2g.portable.cli:import_main"

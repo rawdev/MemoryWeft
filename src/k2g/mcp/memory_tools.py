@@ -188,21 +188,34 @@ def remember_tool(
     # 6. Entity UPSERT + participated_in links
     saved_entities: list[dict[str, Any]] = []
     entity_ids_for_connection: list[str] = []
+    # Batch the is_new existence pre-check into ONE query instead of a per-entity
+    # SELECT — a single network round-trip vs. N over a remote DB (Neon).
+    _names = [n for n in ((e.get("name") or "").strip() for e in (entities or [])) if n]
+    existing_names: set[str] = set()
+    if _names:
+        backend = "postgres" if "Postgres" in type(graph).__name__ else "sqlite"
+        _cur = graph._conn.cursor()
+        if backend == "postgres":
+            _cur.execute(
+                "SELECT name FROM entities WHERE domain = %s AND name = ANY(%s)",
+                (domain, _names),
+            )
+        else:
+            _marks = ",".join(["?"] * len(_names))
+            _cur.execute(
+                f"SELECT name FROM entities WHERE domain = ? AND name IN ({_marks})",
+                (domain, *_names),
+            )
+        existing_names = {
+            (r["name"] if hasattr(r, "keys") else r[0]) for r in _cur.fetchall()
+        }
+
     for ent in entities or []:
         name = (ent.get("name") or "").strip()
         if not name:
             continue
         ent_type = ent.get("type") or ""
-        # Pre-check existence to determine is_new
-        backend = "postgres" if "Postgres" in type(graph).__name__ else "sqlite"
-        ph = "%s" if backend == "postgres" else "?"
-        cur = graph._conn.cursor()
-        cur.execute(
-            f"SELECT id FROM entities WHERE name = {ph} AND domain = {ph}",
-            (name, domain),
-        )
-        existing = cur.fetchone()
-        is_new = existing is None
+        is_new = name not in existing_names
 
         entity_id = graph.link_or_create_entity(name=name, domain=domain, type=ent_type)
         graph.link_participated_in(entity_id=entity_id, event_id=event_id)
@@ -227,13 +240,21 @@ def remember_tool(
     from k2g.core.config import get_settings
     _max_ent = get_settings().community_max_entities_per_event
     if 2 <= len(entity_ids_for_connection) < _max_ent:
-        for i in range(len(entity_ids_for_connection)):
-            for j in range(i + 1, len(entity_ids_for_connection)):
-                graph.upsert_entity_connection(
-                    entity_ids_for_connection[i],
-                    entity_ids_for_connection[j],
-                    event_id,
-                )
+        # Build all pairs and upsert in ONE bulk statement instead of
+        # N(N-1)/2 single-row upserts — each upsert_entity_connection is a
+        # network round-trip, so a 49-entity event was ~1,176 round-trips.
+        # upsert_entity_connections_bulk requires a<b ordering + no duplicate
+        # pairs (satisfied here: one unordered pair per event) and does not
+        # commit, so commit explicitly afterwards.
+        _ids = entity_ids_for_connection
+        conn_rows = []
+        for i in range(len(_ids)):
+            for j in range(i + 1, len(_ids)):
+                a, b = (_ids[i], _ids[j]) if _ids[i] < _ids[j] else (_ids[j], _ids[i])
+                conn_rows.append({"a_id": a, "b_id": b, "count": 1})
+        if conn_rows:
+            graph.upsert_entity_connections_bulk(conn_rows)
+            graph._conn.commit()
 
     # 7. Group + category tree + forced save_tags + event_member_of
     # Resolution logic uses shared helper (consistent with CLI ManifestProducer

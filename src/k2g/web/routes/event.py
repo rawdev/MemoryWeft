@@ -85,23 +85,33 @@ def get_event_detail(
     if not event:
         return {"error": f"Event not found: {event_id}"}
 
-    # 2. Look up summary from Content Store
+    # 2. Summary — the graph ``events.summary`` column is the source of truth;
+    #    the Content Store inline_meta is only a cache (see
+    #     §5). Reading the cache first
+    #    showed "(요약 없음)" whenever the cache was missing/empty even though
+    #    the event had a summary. Prefer the graph value, fall back to cache.
     vector_id = event.get("vector_id", "")
-    summary = ""
+    summary = (event.get("summary") or "").strip()
     original_text = ""
 
     if vector_id:
         content_record = content_store.get_by_vector_id(vector_id)
-        logger.info("Event %s: vector_id=%s, content_record=%s", event_id, vector_id, content_record is not None)
         if content_record:
-            summary = content_record.inline_meta.get("event_summary", "")
-            logger.info("Event %s: storage_uri=%s", event_id, content_record.storage_uri)
-            # 3. Look up original text from Object Storage
-            try:
-                original_text = object_storage.get_text(content_record.storage_uri)
-            except Exception as e:
-                logger.warning("Original text lookup failed: %s (uri=%s)", e, content_record.storage_uri)
-                original_text = ""
+            if not summary:
+                summary = content_record.inline_meta.get("event_summary", "") or ""
+            # 3. Original text — content is stored inline in inline_meta["content"]
+            #    (storage_uri = "inline://..."). Object Storage only holds it for
+            #    non-inline URIs. Reading object storage for an inline:// URI just
+            #    raised and left the text blank, so prefer the inline content and
+            #    fall back to object storage only for real object URIs.
+            original_text = content_record.inline_meta.get("content", "") or ""
+            uri = content_record.storage_uri or ""
+            if not original_text and uri and not uri.startswith("inline://"):
+                try:
+                    original_text = object_storage.get_text(uri)
+                except Exception as e:
+                    logger.warning("Original text lookup failed: %s (uri=%s)", e, uri)
+                    original_text = ""
         else:
             logger.warning("Event %s: no content_record (vector_id=%s)", event_id, vector_id)
 
@@ -119,9 +129,10 @@ def get_event_detail(
         except Exception as e:  # noqa: BLE001
             logger.warning("get_event_by_id(%s) failed: %s", adj_id, e)
             return {"id": adj_id, "summary": ""}
-        summary = ""
+        # graph events.summary is the source of truth; cache is fallback.
+        summary = (ev.get("summary") or "").strip() if ev else ""
         vid = ev.get("vector_id", "") if ev else ""
-        if vid:
+        if not summary and vid:
             try:
                 cr = content_store.get_by_vector_id(vid)
                 if cr:
@@ -175,17 +186,17 @@ def get_entity_events(
         size=size,
     )
 
-    # Add summary to each event
+    # Summary: keep the graph events.summary (source of truth) when present;
+    # only fall back to the Content Store cache when it is empty.
     for ev in events:
+        if (ev.get("summary") or "").strip():
+            continue
+        ev["summary"] = ""
         vid = ev.get("vector_id", "")
         if vid:
             content_record = content_store.get_by_vector_id(vid)
             if content_record:
-                ev["summary"] = content_record.inline_meta.get("event_summary", "")
-            else:
-                ev["summary"] = ""
-        else:
-            ev["summary"] = ""
+                ev["summary"] = content_record.inline_meta.get("event_summary", "") or ""
 
     return sanitize({
         "entity": {"id": entity.get("id"), "name": entity.get("name")},
@@ -213,17 +224,17 @@ def get_tag_events(
         size=size,
     )
 
-    # Add summary to each event
+    # Summary: keep the graph events.summary (source of truth) when present;
+    # only fall back to the Content Store cache when it is empty.
     for ev in events:
+        if (ev.get("summary") or "").strip():
+            continue
+        ev["summary"] = ""
         vid = ev.get("vector_id", "")
         if vid:
             content_record = content_store.get_by_vector_id(vid)
             if content_record:
-                ev["summary"] = content_record.inline_meta.get("event_summary", "")
-            else:
-                ev["summary"] = ""
-        else:
-            ev["summary"] = ""
+                ev["summary"] = content_record.inline_meta.get("event_summary", "") or ""
 
     return sanitize({
         "tag_id": tag_id,

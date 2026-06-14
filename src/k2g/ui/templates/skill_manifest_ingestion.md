@@ -43,17 +43,27 @@ is defined in the guide.
      truncation. Respect per-item (`content ≤ 50000`, `summary ≤ 500`) and total
      (`items ≤ 2000`, `Σcontent ≤ ~5MB`) caps.
    - Set `"complete": true` only when fully written.
+   - **Large input → use the compaction-safe 3-stage method (guide §7)**: a
+     chunk script slices the source from disk to `chunks/<id>.txt` (verbatim, no
+     LLM); you write `chunks/<id>.ann.json` (summary + entities only); then
+     `k2g-manifest-assemble ./chunks -o ./.k2g_tmp/ingest.manifest.json --tag <tag>`
+     merges them byte-exact (no LLM/DB). This keeps the original text out of
+     context so compaction can't corrupt it. Inline authoring is fine only for a
+     few small chunks.
 4. **Run the CLI** (the user's ingestion request is the consent):
    ```bash
-   k2g-ingest-manifest ./.k2g_tmp/ingest.manifest.json --domain <MWeft 저장 domain> --remove-after
+   k2g-ingest-manifest ./.k2g_tmp/ingest.manifest.json --remove-after
    # re-ingesting a source file? add --source for robust change detection:
-   k2g-ingest-manifest ./.k2g_tmp/ingest.manifest.json --domain <domain> --source <orig> --remove-after
+   k2g-ingest-manifest ./.k2g_tmp/ingest.manifest.json --source <orig> --remove-after
    ```
-   **Always pass `--domain`** with the MCP's write domain (the active project's
-   domain — the same value you pass to `mweft_auto_tag_summarize`, visible in any
-   `mweft_search` result's `searched_scope`). This CLI is a subprocess that does
-   NOT inherit the MCP env, so without `--domain` it falls back to `ai_memory`
-   (wrong store).
+   **Backend/domain auto-resolve** — you normally pass neither. This CLI is a
+   subprocess that does NOT inherit the MCP env, so it resolves the project config
+   itself by the manifest's directory: first K2G's project registry
+   (`~/.mweft/mweft_manager.json`, keyed by project dir — applies SQLite/Postgres,
+   DATA_DIR and domain exactly like the MCP), then `.mcp.json` as fallback. Pass
+   overrides only when the project isn't registered or to force a target:
+   `--mcp-config <path>` / `--domain <domain>` / `--data-dir <dir>`
+   (`--data-dir` is SQLite-only; Postgres targets are decided by the DSN).
    **"command not found"?** `k2g-ingest-manifest` / `k2g-manifest-check` live in
    the mweft bundle's venv, which may not be on `PATH`. Do **not** fall back to
    per-event `mweft_remember` — **ask the user for the bundle location** and call
@@ -64,10 +74,10 @@ is defined in the guide.
 
 ## Notes
 
-- `domain` is set by `--domain` (the MCP's write domain — always pass it; a
-  subprocess does not inherit the MCP env, so env alone falls back to
-  `ai_memory`). Do **not** put a `domain` field in the manifest — it is ignored.
-  `working_folder` is server-enforced via env; omit it to use the env default.
+- `domain` auto-resolves from the project registry / `.mcp.json` (step 4); pass
+  `--domain` only to override. Do **not** put a `domain` field in the manifest —
+  it is ignored. `working_folder` is server-enforced via env; omit it to use the
+  env default.
 - All-or-nothing: any invalid item rejects the whole batch (no partial load).
 - Group/tag/forced-tag/community behavior matches `mweft_remember` — manifest
   saves land in the same structure as `mw save`.
