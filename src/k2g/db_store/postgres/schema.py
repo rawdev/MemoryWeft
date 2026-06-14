@@ -603,7 +603,8 @@ CREATE_COVENANT_META_TABLES_SQL = [
         last_ingested TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
         last_vcs_sha  VARCHAR(64),
         extractor_key VARCHAR(64)  NOT NULL DEFAULT 'default',
-        unit_strategy VARCHAR(32)  NOT NULL DEFAULT 'whole_file'
+        unit_strategy VARCHAR(32)  NOT NULL DEFAULT 'whole_file',
+        domain        VARCHAR(128)
     );
     """,
 ]

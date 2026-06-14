@@ -382,6 +382,17 @@ def remember_edit_tool(
     ph = "%s" if backend == "postgres" else "?"
     conn = graph._conn
 
+    # Backend-portable "not deprecated" predicate. Postgres rejects `= 0` on a
+    # BOOLEAN column with a hard type error (operator does not exist:
+    # boolean = integer) — an `OR ... = FALSE` fallback does not save it, the
+    # whole statement fails to plan. SQLite may store deprecated as 0/1 or
+    # 'f'/'false' strings, so it needs the IN-list (see BP-92 lexical unify).
+    e_live = (
+        "(e.deprecated = FALSE OR e.deprecated IS NULL)"
+        if backend == "postgres"
+        else "(e.deprecated IN (0, 'f', 'false') OR e.deprecated IS NULL)"
+    )
+
     # Look up the event and its domain
     cur = conn.cursor()
     cur.execute(f"SELECT domain FROM events WHERE id = {ph}", (event_id,))
@@ -466,8 +477,7 @@ def remember_edit_tool(
                 f"SELECT e.id FROM entities e "
                 f"JOIN participated_in p ON p.entity_id = e.id "
                 f"WHERE p.event_id = {ph} AND e.id != {ph} "
-                f"AND (e.deprecated = 0 OR e.deprecated IS NULL "
-                f"OR e.deprecated = FALSE)",
+                f"AND {e_live}",
                 (event_id, entity_id),
             )
             other_ids = [r[0] for r in cur.fetchall()]
@@ -482,7 +492,7 @@ def remember_edit_tool(
         f"SELECT e.id, e.name, e.type FROM entities e "
         f"JOIN participated_in p ON p.entity_id = e.id "
         f"WHERE p.event_id = {ph} "
-        f"AND (e.deprecated = 0 OR e.deprecated IS NULL OR e.deprecated = FALSE)",
+        f"AND {e_live}",
         (event_id,),
     )
     now_linked = [

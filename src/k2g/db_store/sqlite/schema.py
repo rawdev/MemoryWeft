@@ -634,7 +634,8 @@ _CREATE_COVENANT_META_TABLES_SQL = [
         last_ingested TEXT NOT NULL,
         last_vcs_sha  TEXT,
         extractor_key TEXT NOT NULL DEFAULT 'default',
-        unit_strategy TEXT NOT NULL DEFAULT 'whole_file'
+        unit_strategy TEXT NOT NULL DEFAULT 'whole_file',
+        domain        TEXT
     );
     """,
 ]

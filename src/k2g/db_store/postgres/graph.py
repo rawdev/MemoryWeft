@@ -396,6 +396,18 @@ class PostgresGraphStore(ReconnectingConnMixin):
             # BP-46 — Covenant metadata
             for sql in CREATE_COVENANT_META_TABLES_SQL:
                 cur.execute(sql)
+            # k2g_source_file.domain — covenant-derived tenant axis (RLS_TABLES
+            # parity). Add + backfill from the parent covenant for existing DBs.
+            cur.execute(
+                "ALTER TABLE k2g_source_file "
+                "ADD COLUMN IF NOT EXISTS domain VARCHAR(128)"
+            )
+            cur.execute(
+                "UPDATE k2g_source_file sf SET domain = c.domain "
+                "FROM k2g_covenant c "
+                # source_file.covenant_id = str(covenant.id) → cast for the join
+                "WHERE c.id::text = sf.covenant_id AND sf.domain IS NULL"
+            )
             # BP-47 Phase B — Share group + member + audit
             for sql in CREATE_SHARE_TABLES_SQL:
                 cur.execute(sql)

@@ -66,7 +66,8 @@ CREATE TABLE IF NOT EXISTS k2g_source_file (
     last_ingested TEXT NOT NULL,
     last_vcs_sha  TEXT,
     extractor_key TEXT NOT NULL DEFAULT 'default',
-    unit_strategy TEXT NOT NULL DEFAULT 'whole_file'
+    unit_strategy TEXT NOT NULL DEFAULT 'whole_file',
+    domain        TEXT
 );
 """
 
@@ -149,6 +150,16 @@ class CovenantStore:
         cur.execute(_CREATE_COVENANT_SQL)
         cur.execute(_CREATE_HISTORY_SQL)
         cur.execute(_CREATE_SOURCE_FILE_SQL)
+        # Ensure k2g_source_file.domain exists on older standalone DBs + backfill
+        # from the parent covenant (covenant_id = str(covenant.id)).
+        cur.execute("PRAGMA table_info(k2g_source_file)")
+        if "domain" not in {row["name"] for row in cur.fetchall()}:
+            cur.execute("ALTER TABLE k2g_source_file ADD COLUMN domain TEXT")
+        cur.execute(
+            "UPDATE k2g_source_file SET domain = ("
+            "SELECT domain FROM k2g_covenant WHERE CAST(id AS TEXT) = covenant_id"
+            ") WHERE domain IS NULL"
+        )
         for idx_sql in _CREATE_INDEXES_SQL:
             cur.execute(idx_sql)
         self._conn.commit()
@@ -322,8 +333,11 @@ class CovenantStore:
             """
             INSERT OR REPLACE INTO k2g_source_file
                 (id, covenant_id, relative_path, content_hash, size_bytes,
-                 mime_type, last_ingested, last_vcs_sha, extractor_key, unit_strategy)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 mime_type, last_ingested, last_vcs_sha, extractor_key, unit_strategy,
+                 domain)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    -- domain — covenant-derived tenant axis (RLS_TABLES parity)
+                    (SELECT domain FROM k2g_covenant WHERE CAST(id AS TEXT) = ?))
             """,
             (
                 record["id"],
@@ -336,6 +350,7 @@ class CovenantStore:
                 record.get("last_vcs_sha"),
                 record.get("extractor_key", "default"),
                 record.get("unit_strategy", "whole_file"),
+                record["covenant_id"],  # for the domain subquery above
             ),
         )
         self._conn.commit()

@@ -259,6 +259,19 @@ class SqliteGraphStore:
             # Covenant metadata (k2g_covenant + history + source_file)
             for sql in _CREATE_COVENANT_META_TABLES_SQL:
                 cur.execute(sql)
+            # k2g_source_file.domain — covenant-derived tenant axis (RLS_TABLES
+            # parity). Add + backfill from the parent covenant for existing DBs.
+            cur.execute("PRAGMA table_info(k2g_source_file)")
+            _sf_cols = {row["name"] for row in cur.fetchall()}
+            if "domain" not in _sf_cols:
+                cur.execute("ALTER TABLE k2g_source_file ADD COLUMN domain TEXT")
+                logger.info("migration: added k2g_source_file.domain")
+            cur.execute(
+                "UPDATE k2g_source_file SET domain = ("
+                # source_file.covenant_id = str(covenant.id) → cast for the join
+                "SELECT domain FROM k2g_covenant WHERE CAST(id AS TEXT) = covenant_id"
+                ") WHERE domain IS NULL"
+            )
             # Share group + member + audit
             for sql in _CREATE_SHARE_TABLES_SQL:
                 cur.execute(sql)

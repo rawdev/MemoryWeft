@@ -351,10 +351,13 @@ class CovenantMetaStore:
                     "INSERT OR REPLACE INTO k2g_source_file "
                     "(id, covenant_id, relative_path, content_hash, "
                     " size_bytes, mime_type, last_ingested, last_vcs_sha, "
-                    " extractor_key, unit_strategy) "
+                    " extractor_key, unit_strategy, domain) "
                     f"VALUES ({self._ph}, {self._ph}, {self._ph}, {self._ph}, "
                     f"{self._ph}, {self._ph}, {self._ph}, {self._ph}, "
-                    f"{self._ph}, {self._ph})"
+                    f"{self._ph}, {self._ph}, "
+                    # domain — covenant-derived tenant axis (RLS_TABLES parity)
+                    f"(SELECT domain FROM k2g_covenant "
+                    f"WHERE CAST(id AS TEXT) = {self._ph}))"
                 )
             else:
                 # Postgres: ON CONFLICT (id) DO UPDATE
@@ -362,10 +365,13 @@ class CovenantMetaStore:
                     "INSERT INTO k2g_source_file "
                     "(id, covenant_id, relative_path, content_hash, "
                     " size_bytes, mime_type, last_ingested, last_vcs_sha, "
-                    " extractor_key, unit_strategy) "
+                    " extractor_key, unit_strategy, domain) "
                     f"VALUES ({self._ph}, {self._ph}, {self._ph}, {self._ph}, "
                     f"{self._ph}, {self._ph}, {self._ph}, {self._ph}, "
-                    f"{self._ph}, {self._ph}) "
+                    f"{self._ph}, {self._ph}, "
+                    # domain — covenant-derived tenant axis (RLS_TABLES parity)
+                    f"(SELECT domain FROM k2g_covenant "
+                    f"WHERE id::text = {self._ph})) "
                     "ON CONFLICT (id) DO UPDATE SET "
                     "  covenant_id   = EXCLUDED.covenant_id, "
                     "  relative_path = EXCLUDED.relative_path, "
@@ -375,7 +381,8 @@ class CovenantMetaStore:
                     "  last_ingested = EXCLUDED.last_ingested, "
                     "  last_vcs_sha  = EXCLUDED.last_vcs_sha, "
                     "  extractor_key = EXCLUDED.extractor_key, "
-                    "  unit_strategy = EXCLUDED.unit_strategy"
+                    "  unit_strategy = EXCLUDED.unit_strategy, "
+                    "  domain        = EXCLUDED.domain"
                 )
             cur.execute(sql, (
                 record["id"],
@@ -388,6 +395,7 @@ class CovenantMetaStore:
                 record.get("last_vcs_sha"),
                 record.get("extractor_key", "default"),
                 record.get("unit_strategy", "whole_file"),
+                record["covenant_id"],  # for the domain subquery above
             ))
             self._commit()
         except Exception:
