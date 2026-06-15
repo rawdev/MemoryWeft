@@ -483,7 +483,15 @@ class DomainExporter:
         try:
             cur.execute(sql, (domain,))
             out: list[dict[str, Any]] = []
-            for rid, emb in cur.fetchall():
+            for row in cur.fetchall():
+                # PostgresGraphStore uses a RealDictCursor → rows are dict-like;
+                # SQLite returns tuples. Tuple-unpacking a dict row yields its KEY
+                # names ('id', 'embedding'), so the old `for rid, emb in ...` made
+                # decode_embedding choke and silently exported 0 vectors on PG.
+                if isinstance(row, dict):
+                    rid, emb = row["id"], row["embedding"]
+                else:
+                    rid, emb = row[0], row[1]
                 vec = decode_embedding(emb)
                 if vec is not None:
                     out.append({"id": rid, "embedding": vec})
