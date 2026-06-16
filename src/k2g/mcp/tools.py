@@ -38,6 +38,13 @@ from k2g.mcp.schemas import (
 
 logger = logging.getLogger(__name__)
 
+# Relevance gate for the search deficit signal: a result beyond the shown slice
+# only marks `more_available` when its score is within this fraction of the
+# weakest shown result. Self-calibrating per query (relative to shown_min), so
+# no absolute cosine-similarity magic number. Heuristic default — tune against
+# measured score distributions; `tail_score` is surfaced for transparency.
+_TAIL_RELEVANCE_RATIO = 0.8
+
 
 def _to_float(v: Any) -> float | None:
     if v is None:
@@ -189,7 +196,7 @@ def search_tool(
         event_hits = deps.vector.search(
             query_vector=query_vector,
             filter_search_targets=filter_search_targets,
-            limit=k,
+            limit=k + 1,  # +1 probe → detect more_available beyond the shown slice
         )
         for hit in event_hits:
             # PgVectorStore returns a flat shape ({id, domain, summary,
@@ -242,7 +249,7 @@ def search_tool(
         entity_hits = deps.vector.search_similar_entities(
             query_vector=query_vector,
             domain=entity_domains,
-            limit=k,
+            limit=k + 1,  # +1 probe → detect more_available beyond the shown slice
         )
         for hit in entity_hits:
             # PgVectorStore.search_similar_entities returns a flat shape
@@ -274,10 +281,28 @@ def search_tool(
             )
 
     hits.sort(key=lambda h: h.score, reverse=True)
-    if normalized_mode == "hybrid":
-        hits = hits[: k * 2]
-    else:
-        hits = hits[:k]
+    # Deficit signal (relevance-gated): the +1 probe per branch over-fetched, so
+    # the ranked list may exceed the display cap. "More" counts only when the
+    # first result *beyond* the shown slice (`tail_score`) is still comparable to
+    # the weakest result we showed (`shown_min`) — within _TAIL_RELEVANCE_RATIO.
+    # A broad query's loosely-similar tail drops off sharply after the slice, so
+    # query breadth alone no longer inflates more_available. `tail_score` is
+    # surfaced so the caller can judge the drop-off itself, not just trust the flag.
+    ranked_count = len(hits)
+    cap = k * 2 if normalized_mode == "hybrid" else k
+    shown = min(cap, ranked_count)
+    shown_min = hits[shown - 1].score if shown > 0 else 0.0
+    tail_score = hits[cap].score if ranked_count > cap else None
+    hits = hits[:cap]
+    more_available = (
+        tail_score is not None
+        and tail_score >= shown_min * _TAIL_RELEVANCE_RATIO
+    )
+    continuation = (
+        f"{shown} shown; more results of comparable relevance match — call "
+        f"mweft_search_window(query, start={shown + 1}) to page beyond this."
+        if more_available else None
+    )
 
     # Build the connection map (hint system): attach connections to each hit
     # and include a hint block in the response. Errors are isolated so that
@@ -295,6 +320,10 @@ def search_tool(
         hits=hits,
         total=len(hits),
         hint=hint_block,
+        shown=shown,
+        more_available=more_available,
+        tail_score=round(tail_score, 4) if tail_score is not None else None,
+        continuation=continuation,
     ).model_dump()
     from k2g.mcp.contracts import match_for_tool, extract_evidence
     hit_kinds = {h.kind for h in hits}

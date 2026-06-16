@@ -817,3 +817,38 @@ def get_contract(topic: str) -> str:
         return _contracts_module.read_full(clean)
     except KeyError:
         return f"# Unknown contract: {clean}\n\nAvailable: {', '.join(_contracts_module.list_topics())}"
+
+
+@mcp_app.tool()
+@_telemetry_wrap("mweft_search_window")
+def mweft_search_window(
+    query: str,
+    start: int = 1,
+    count: int = 10,
+    mode: str = "events",
+    conversation_id: str | None = None,
+) -> dict[str, Any]:
+    """Chained, paged search — a ranked *window* plus an explicit deficit signal.
+
+    Unlike ``mweft_search`` (rich, hint-enriched, looks self-complete), this
+    returns a thin window of the ranked result set and advertises what lies
+    *beyond* it, so results can be pulled incrementally instead of treating the
+    first response as the whole world.
+
+    Args:
+        query: Natural-language query string.
+        start: 1-based rank index of the first result in the window.
+        count: Window size (1–50, clamped).
+        mode: ``"events"`` (default), ``"entities"``, or ``"hybrid"``.
+
+    Returns:
+        ``{query, mode, window:{start,end,returned}, hits:[{index,id,kind,
+        score,name_or_summary}], more_available, next_start,
+        candidates_ranked, capped, instruction, searched_scope}``. When
+        ``more_available`` is true, call again with ``start=next_start`` to
+        chain to the next window.
+    """
+    from k2g.mcp.window_tools import search_window_tool
+    return search_window_tool(
+        _get_deps(), query=query, start=start, count=count, mode=mode,
+    )

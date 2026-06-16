@@ -51,6 +51,12 @@ Follow these rules when answering user questions.
    - Use `mweft_sql_query` for exact counts and table facts
      ("how many X", "does table Y have rows"). Do not add
      `WHERE domain = ...` unless the user asked to restrict.
+   - Use `mweft_search_window(query, start, count, mode)` to **page** the
+     ranked result set when breadth matters (enumerate / "list all" /
+     browse) or when a `mweft_search` slice looks partial. Returns a window
+     plus a deficit signal — `more_available` / `next_start` /
+     `candidates_ranked` / `capped`. `mweft_search` is unchanged; this is the
+     lean continuation view (no hint). See expand-before-answer (#7).
    - Sort `mweft_search` / `mweft_sql_query` results by `created_at`
      (or `timestamp`), newest first; on conflict prefer the newest.
 
@@ -83,7 +89,19 @@ Follow these rules when answering user questions.
    - `connections.similar` / `connected` / `profile` — entity detail to follow.
    - `hint.available_channels` — which `reason` tags appear in the result.
 
-7. If `mw` / `mweft` / `memoryweft` prefix appears, use MWeft search /
+7. Expand before answering — a single search is a *slice, not the world*.
+   The `hits` + `hint` can look self-complete; do not treat them as
+   exhaustive just because they fit in one response.
+   - If the question needs completeness (enumerate, count-by-listing,
+     "all the X", browse) and a window's `more_available` is true, continue
+     with `mweft_search_window(..., start=next_start)` until `more_available`
+     is false (whole set seen) or `capped` is true.
+   - If `capped` is true, the query is too broad to page through — narrow it
+     (add terms / use `mweft_sql_query`) rather than paging on.
+   - For a focused question, one `mweft_search` is enough — do **not**
+     over-page. Breadth questions expand; pinpoint questions do not.
+
+8. If `mw` / `mweft` / `memoryweft` prefix appears, use MWeft search /
    lookup / auto_tag_detail explicitly.
 
 ### Community / auto-tag summaries (event / entity clusters)

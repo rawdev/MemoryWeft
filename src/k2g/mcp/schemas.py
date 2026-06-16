@@ -79,6 +79,18 @@ class SearchResponse(BaseModel):
     hint: HintBlock | None = None
     total: int
     hits: list[SearchHit]
+    # Deficit signal (additive, backward-compatible defaults). A top-k slice
+    # looks self-complete; these advertise that the ranked set extends beyond
+    # what is shown so the LLM can chain via mweft_search_window instead of
+    # treating this response as the whole world. ``more_available`` is detected
+    # with a cheap +1 over-fetch probe (not an exact match count).
+    shown: int = 0
+    more_available: bool = False
+    # Score of the first result beyond the shown slice (cosine similarity), or
+    # None when nothing is beyond it. Surfaced so the caller can judge the
+    # relevance drop-off directly; more_available is gated on it.
+    tail_score: float | None = None
+    continuation: str | None = None
 
 
 class EventSummary(BaseModel):
