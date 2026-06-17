@@ -15,6 +15,14 @@ time.**
 **AIs running separately on your laptop and desktop — and the AIs each teammate
 uses on their own — share context out of a single memory.**
 
+**Save an important conversation with your AI using a command, or convert a whole
+document into memory in one shot.**
+
+**Stored data can be recalled anytime with a command, and the AI will go on to
+search for related content by context and fold it into the results.**
+
+Just use commands like "mw save", "mw search", or "save all these documents to
+mw".
 
 ## Architecture
 
