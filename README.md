@@ -8,6 +8,16 @@ Knowledge Graph (ECKG)** idea.
 It runs as a stdio MCP server backed by a single SQLite file, or Postgres +
 pgvector.
 
+
+**MemoryWeft is shared memory. Multiple AIs can access one memory at the same
+time.**
+
+**AIs running separately on your laptop and desktop — and the AIs each teammate
+uses on their own — share context out of a single memory.**
+
+
+## Architecture
+
 MemoryWeft splits information into **entities** (objects) and **events**
 (descriptions of how objects relate), storing each separately, and computes and
 stores alongside them the values it needs for text, RAG, and graph relations.
@@ -19,17 +29,13 @@ The resulting graph relations are defined and handled in the two ways below:
 
 2. Event-to-event relations are defined fluidly from their shared entities.
 
+Because it's shared memory, an event once added should not be deleted if at all
+possible.
+
 MemoryWeft offers two ways to store — MCP functions and bulk document ingestion —
 both fully controllable by an AI through tool calls. Stored data can then be
 searched from many angles — keyword, RAG, and graph relations — and returns rich
 results.
-
-![MemoryWeft Manager — Domain Summary](asset/1.png)
-
-*The bundled **Manager** app shows a domain at a glance — entity / event /
-connection counts, Leiden communities, and the top hub entities.*
-
-## Architecture in 30 seconds
 
 Node kinds
 - `entities`
@@ -56,6 +62,16 @@ graphs to surface emergent clusters automatically.
 
 The `mweft_auto_tag_*` and `mweft_community_*` tools let the LLM summarize the
 cluster structure and drill into a specific community's members.
+
+## Manager
+
+A bundled **Manager** app helps you install the MCP and switch databases, so you
+can easily pick which DB to use.
+
+![MemoryWeft Manager — Domain Summary](asset/1.png)
+
+*The bundled **Manager** app shows a domain at a glance — entity / event /
+connection counts, Leiden communities, and the top hub entities.*
 
 ![Manager — Analysis: Leiden community graph](asset/3.png)
 
