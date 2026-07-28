@@ -104,14 +104,24 @@ def _migrate_groups_unique(cur: Any, conn: Any) -> bool:
     if legacy is None:
         return False
 
+    # Full column spec of the live table — the rebuilt table must be able to
+    # receive every one of them. Columns added later by ALTER (org_id, and any
+    # future one) are NOT in the CREATE TABLE text, so the fresh table would
+    # lack them and the copy would fail with "table groups has no column
+    # named org_id" — taking the whole store down at open, since setup_schema
+    # runs in __init__.
     cur.execute("PRAGMA table_info(groups)")
-    old_cols = [
-        (r["name"] if isinstance(r, sqlite3.Row) else r[1]) for r in cur.fetchall()
+    old_spec = [
+        (
+            r["name"] if isinstance(r, sqlite3.Row) else r[1],
+            r["type"] if isinstance(r, sqlite3.Row) else r[2],
+            r["notnull"] if isinstance(r, sqlite3.Row) else r[3],
+            r["dflt_value"] if isinstance(r, sqlite3.Row) else r[4],
+        )
+        for r in cur.fetchall()
     ]
+    old_cols = [c[0] for c in old_spec]
     has_type = "type" in old_cols
-    carried = ", ".join(old_cols)
-    select = carried if has_type else f"{carried}, 'user'"
-    target = carried if has_type else f"{carried}, type"
 
     logger.info("migration: rebuilding groups to UNIQUE(name, domain, type)")
     # PRAGMA foreign_keys is a no-op inside a transaction; close any open one.
@@ -129,6 +139,29 @@ def _migrate_groups_unique(cur: Any, conn: Any) -> bool:
             if "CREATE TABLE IF NOT EXISTS groups" in sql:
                 cur.execute(sql)
                 break
+        # Re-add whatever the live table had beyond the CREATE TABLE text, with
+        # its declared type/NOT NULL/DEFAULT, so no column (and no data) is
+        # dropped. A NOT NULL column with no default cannot be added by ALTER —
+        # take it as nullable; the copy fills every row anyway.
+        cur.execute("PRAGMA table_info(groups)")
+        fresh = {
+            (r["name"] if isinstance(r, sqlite3.Row) else r[1])
+            for r in cur.fetchall()
+        }
+        for name, ctype, notnull, dflt in old_spec:
+            if name in fresh:
+                continue
+            decl = f"{name} {ctype or 'TEXT'}"
+            if notnull and dflt is not None:
+                decl += f" NOT NULL DEFAULT {dflt}"
+            elif dflt is not None:
+                decl += f" DEFAULT {dflt}"
+            cur.execute(f"ALTER TABLE groups ADD COLUMN {decl}")  # noqa: S608
+            logger.info("migration: carried groups.%s through rebuild", name)
+
+        carried = ", ".join(old_cols)
+        select = carried if has_type else f"{carried}, 'user'"
+        target = carried if has_type else f"{carried}, type"
         cur.execute(
             f"INSERT INTO groups ({target}) "  # noqa: S608 — names from PRAGMA
             f"SELECT {select} FROM groups_legacy_unique"

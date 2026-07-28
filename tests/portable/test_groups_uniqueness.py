@@ -103,12 +103,35 @@ CREATE TABLE groups (
 );
 """
 
+# Columns older releases added by ALTER *after* CREATE TABLE. They are absent
+# from the CREATE TABLE text, so a rebuild that only replays that text would
+# silently drop them — which is exactly how the first cut of this migration
+# broke ("table groups has no column named org_id", raised from __init__ and
+# so taking the whole store down). Any realistic legacy fixture must have them.
+_LEGACY_ALTERS = (
+    ("owner_id", "TEXT"),
+    ("org_id", "TEXT"),
+    ("visibility", "TEXT NOT NULL DEFAULT 'public'"),
+    ("acl_json", "TEXT"),
+    ("share_group_id", "TEXT"),
+)
+
+
+def _make_legacy(path: Path, *, with_alters: bool = True) -> None:
+    raw = sqlite3.connect(path)
+    raw.executescript(_LEGACY_DDL)
+    if with_alters:
+        for col, decl in _LEGACY_ALTERS:
+            raw.execute(f"ALTER TABLE groups ADD COLUMN {col} {decl}")
+    raw.commit()
+    raw.close()
+
 
 def test_legacy_global_unique_is_migrated(tmp_path: Path) -> None:
     """전역 UNIQUE 로 만들어진 기존 DB 가 데이터를 보존한 채 옮겨져야 한다."""
     path = tmp_path / "legacy.db"
+    _make_legacy(path, with_alters=False)
     raw = sqlite3.connect(path)
-    raw.executescript(_LEGACY_DDL)
     raw.execute(
         "INSERT INTO groups (id, name, level, domain, source, deprecated,"
         " created_at) VALUES ('old1', 'kept', 0, 'd', 'user', 0, '2026-01-01')"
@@ -137,12 +160,40 @@ def test_legacy_global_unique_is_migrated(tmp_path: Path) -> None:
         g._conn.close()
 
 
-def test_migration_is_idempotent(tmp_path: Path) -> None:
+def test_alter_added_columns_survive_the_rebuild(tmp_path: Path) -> None:
+    """실사용 DB 모양 — CREATE TABLE 에 없고 ALTER 로만 붙던 컬럼(org_id 등)이
+    재생성을 넘어 값까지 살아남아야 한다.
+
+    이게 깨지면 setup_schema 가 __init__ 에서 예외를 던져 프로젝트를 아예 못 연다.
+    """
     path = tmp_path / "legacy.db"
+    _make_legacy(path)
     raw = sqlite3.connect(path)
-    raw.executescript(_LEGACY_DDL)
+    raw.execute(
+        "INSERT INTO groups (id, name, level, domain, org_id, owner_id,"
+        " visibility, acl_json) VALUES ('old1', 'kept', 0, 'd', 'org_x',"
+        " 'u1', 'private', '{\"a\":1}')"
+    )
     raw.commit()
     raw.close()
+
+    g = SqliteGraphStore(str(path))
+    try:
+        cols = {r[1] for r in g._conn.execute("PRAGMA table_info(groups)")}
+        for col, _decl in _LEGACY_ALTERS:
+            assert col in cols, f"{col} 이 재생성에서 사라졌다"
+        row = g._conn.execute(
+            "SELECT org_id, owner_id, visibility, acl_json, type"
+            " FROM groups WHERE id='old1'"
+        ).fetchone()
+        assert tuple(row) == ("org_x", "u1", "private", '{"a":1}', "user"), row
+    finally:
+        g._conn.close()
+
+
+def test_migration_is_idempotent(tmp_path: Path) -> None:
+    path = tmp_path / "legacy.db"
+    _make_legacy(path)
     for _ in range(2):
         g = SqliteGraphStore(str(path))
         g._conn.close()
