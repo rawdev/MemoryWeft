@@ -3625,6 +3625,56 @@ async function doImport() {
     <div><span style="color:green">✓</span> ${t('imp.restoredOk')}</div>
     <pre>${escapeHtml(JSON.stringify(data.results, null, 2))}</pre>
   `;
+  await _impOfferDerivedRebuild(out, data);
+}
+
+// An archive exported with `include_derived=False` carries no event-jaccard
+// graph and no community assignments, so event auto-tags come up empty. Both
+// are rebuildable from the imported Tier-1 edges alone (no embeddings needed) —
+// but the Analysis panel only reaches Jaccard through the stopword [Apply]
+// pipeline, which aborts early when no checkbox changed. A freshly imported
+// project therefore has no reachable path, so offer it right here.
+async function _impOfferDerivedRebuild(out, data) {
+  const results = (data && data.results) || {};
+  const rows = (tbl) => ((results[tbl] || {}).inserted || 0);
+  // Nothing to rebuild if the archive already carried the derived graph.
+  if (rows('event_jaccard_connected') > 0) return;
+  // Nothing to rebuild from, either — an empty graph needs no recompute.
+  if (rows('events') === 0 && rows('entities') === 0) return;
+
+  const d = domain();
+  if (!d) { _impDerivedHint(out); return; }
+
+  if (!confirm(t('imp.derivedPrompt'))) { _impDerivedHint(out); return; }
+
+  const status = document.createElement('div');
+  status.className = 'muted';
+  out.appendChild(status);
+  try {
+    status.innerHTML = `<span class="sx-spinner"></span> ${t('an.run.jaccardStep')}`;
+    const jr = await _anRunJaccard(d, status);
+    if (jr.error) throw new Error(jr.error);
+    const eLR = await _anRunLeiden('entity', d, status, t('an.sw.step2'));
+    if (eLR.error) throw new Error(eLR.error);
+    const evLR = await _anRunLeiden('event', d, status, t('an.sw.step4'));
+    if (evLR.error) throw new Error(evLR.error);
+    status.innerHTML = `<span style="color:green">✓</span> ${t('imp.derivedDone')}`;
+  } catch (e) {
+    status.innerHTML = `<span style="color:red">${t('imp.derivedFailed', {
+      e: escapeHtml(String((e && e.message) || e)),
+    })}</span>`;
+    _impDerivedHint(out);
+  }
+}
+
+// Shown when the user declines the rebuild or it fails — so the instructions
+// survive after the modal dialog is gone.
+function _impDerivedHint(out) {
+  const box = document.createElement('div');
+  box.className = 'muted';
+  box.style.marginTop = '6px';
+  box.innerHTML = t('imp.derivedHint');
+  out.appendChild(box);
 }
 
 // FastAPI error detail can be a string or a structured object ({code, message}).
