@@ -253,6 +253,14 @@ def denormalize_for_column(col: str, v: Any) -> Any:
     """
     if col in BOOLEAN_COLUMNS:
         return coerce_boolean(v)
+    if isinstance(v, (dict, list)):
+        # JSON/JSONB column — exported as a nested object/array (normalize_value
+        # passes JSON-compatible values through). Re-serialize to a JSON string:
+        # Postgres coerces text→jsonb on INSERT, SQLite stores the text. Without
+        # this, psycopg2 raises "can't adapt type 'dict'" on JSONB columns
+        # (e.g. train_run params). pgvector embeddings export as a '[...]' string
+        # (not a Python list), so they are unaffected.
+        return json.dumps(v, ensure_ascii=False, separators=(",", ":"))
     return denormalize_value(v)
 
 
