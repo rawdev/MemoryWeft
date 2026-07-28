@@ -36,9 +36,14 @@ EVENTS_COLUMNS: tuple[str, ...] = (
     "source_tombstoned_at", "tombstoned_at", "tombstoned_reason", "tombstoned_by",
 )
 
+# ``type`` is part of the uniqueness key — ``UNIQUE (name, domain, type)`` — so
+# it must travel: it is what lets a 'system' mirror coexist with a same-named
+# user tag. Dropping it collapses both rows onto the DEFAULT 'user' and the
+# restore dies on the unique index.
 GROUPS_COLUMNS: tuple[str, ...] = (
     "id", "name", "level", "domain", "parent_id", "discriminator",
-    "original_name", "source", "user_tag", "summary", "deprecated", "created_at",
+    "original_name", "source", "type", "user_tag", "summary", "deprecated",
+    "created_at",
     "owner_id", "org_id", "visibility", "acl_json", "share_group_id",
 )
 

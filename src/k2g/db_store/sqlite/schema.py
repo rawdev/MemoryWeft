@@ -59,13 +59,17 @@ _CREATE_TIER1_TABLES_SQL = [
     """
     CREATE TABLE IF NOT EXISTS groups (
         id             TEXT    PRIMARY KEY,
-        name           TEXT    NOT NULL UNIQUE,
+        name           TEXT    NOT NULL,
         level          INTEGER,
         domain         TEXT    NOT NULL,
         parent_id      TEXT    REFERENCES groups(id),
         discriminator  TEXT,
         original_name  TEXT,
         source         TEXT,
+        -- Authority axis (≠ source=provenance): 'user' (default) | 'system'
+        -- (server-side principal-search mirror). Part of the uniqueness key so
+        -- a system mirror can coexist with a same-named user tag.
+        type           TEXT    NOT NULL DEFAULT 'user',
         user_tag       TEXT,
         summary        TEXT,
         deprecated     INTEGER NOT NULL DEFAULT 0,
@@ -76,7 +80,12 @@ _CREATE_TIER1_TABLES_SQL = [
         visibility     TEXT    NOT NULL DEFAULT 'public',
         share_group_id TEXT    REFERENCES k2g_share_group(id) ON DELETE SET NULL,
         acl_json       TEXT,
-        created_at     TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
+        created_at     TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        -- Was a global ``name UNIQUE``. That cannot represent a multi-domain
+        -- install: the same tag name legitimately exists in two domains, and a
+        -- 'system' mirror legitimately shadows a user tag. Scoping the key is
+        -- also what makes an archive from a domain-scoped source importable.
+        UNIQUE (name, domain, type)
     );
     """,
 ]

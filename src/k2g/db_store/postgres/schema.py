@@ -81,13 +81,19 @@ def CREATE_TIER1_TABLES_SQL(dim: int = 1024) -> list[str]:
         """
         CREATE TABLE IF NOT EXISTS groups (
             id             VARCHAR(64)  PRIMARY KEY,
-            name           VARCHAR(512) NOT NULL UNIQUE,
+            name           VARCHAR(512) NOT NULL,
             level          INTEGER,
             domain         VARCHAR(128) NOT NULL,
             parent_id      VARCHAR(64)  REFERENCES groups(id),
             discriminator  VARCHAR(64),
             original_name  VARCHAR(512),
             source         VARCHAR(64),
+            -- Authority axis (≠ source=provenance): 'user' (default) |
+            -- 'system' (server-side principal-search mirror). Part of the
+            -- uniqueness key so a system mirror can coexist with a same-named
+            -- user tag. SQLite parity.
+            type           VARCHAR(32)  NOT NULL DEFAULT 'user',
+            UNIQUE (name, domain, type),
             user_tag       VARCHAR(128),
             summary        TEXT,
             deprecated     BOOLEAN      NOT NULL DEFAULT FALSE,

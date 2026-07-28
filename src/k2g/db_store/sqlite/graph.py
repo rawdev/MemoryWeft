@@ -68,6 +68,85 @@ def _phase1b_sqlite(desc: str) -> NotImplementedError:
     return NotImplementedError(f"Phase 1b: {desc}")
 
 
+def _migrate_groups_unique(cur: Any, conn: Any) -> bool:
+    """Replace the legacy global ``groups.name UNIQUE`` with
+    ``UNIQUE(name, domain, type)`` (adding ``type`` when absent).
+
+    A global name key cannot represent a multi-domain install — the same tag
+    name legitimately exists in two domains, and a server-side ``'system'``
+    mirror legitimately shadows a same-named user tag. It also makes archives
+    from a domain-scoped source unimportable (observed:
+    ``UNIQUE constraint failed: groups.name``).
+
+    SQLite cannot drop a column-level UNIQUE (it is an implicit index), so the
+    table must be rebuilt. Guarded to run at most once: it is a no-op as soon
+    as the implicit ``sqlite_autoindex`` on ``name`` alone is gone.
+
+    Returns True when a rebuild happened.
+    """
+    # Does a single-column unique index on `name` still exist? Named indexes
+    # are ours and are recreated below; only the implicit one blocks us.
+    cur.execute("PRAGMA index_list(groups)")
+    legacy = None
+    for row in cur.fetchall():
+        idx = row["name"] if isinstance(row, sqlite3.Row) else row[1]
+        unique = row["unique"] if isinstance(row, sqlite3.Row) else row[2]
+        if not unique:
+            continue
+        cur.execute(f"PRAGMA index_info({idx})")
+        cols = [
+            (r["name"] if isinstance(r, sqlite3.Row) else r[2])
+            for r in cur.fetchall()
+        ]
+        if cols == ["name"]:
+            legacy = idx
+            break
+    if legacy is None:
+        return False
+
+    cur.execute("PRAGMA table_info(groups)")
+    old_cols = [
+        (r["name"] if isinstance(r, sqlite3.Row) else r[1]) for r in cur.fetchall()
+    ]
+    has_type = "type" in old_cols
+    carried = ", ".join(old_cols)
+    select = carried if has_type else f"{carried}, 'user'"
+    target = carried if has_type else f"{carried}, type"
+
+    logger.info("migration: rebuilding groups to UNIQUE(name, domain, type)")
+    # PRAGMA foreign_keys is a no-op inside a transaction; close any open one.
+    conn.commit()
+    cur.execute("PRAGMA foreign_keys = OFF")
+    try:
+        cur.execute("BEGIN")
+        # legacy_alter_table=OFF (the default) makes RENAME rewrite references
+        # in other tables' FK clauses, which is exactly what we do NOT want
+        # here — we rename our temp table into place and the existing FKs
+        # already point at `groups`.
+        cur.execute("PRAGMA legacy_alter_table = ON")
+        cur.execute("ALTER TABLE groups RENAME TO groups_legacy_unique")
+        for sql in _CREATE_TIER1_TABLES_SQL:
+            if "CREATE TABLE IF NOT EXISTS groups" in sql:
+                cur.execute(sql)
+                break
+        cur.execute(
+            f"INSERT INTO groups ({target}) "  # noqa: S608 — names from PRAGMA
+            f"SELECT {select} FROM groups_legacy_unique"
+        )
+        cur.execute("DROP TABLE groups_legacy_unique")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        try:
+            cur.execute("PRAGMA legacy_alter_table = OFF")
+            cur.execute("PRAGMA foreign_keys = ON")
+        except Exception:  # noqa: BLE001
+            pass
+    return True
+
+
 class SqliteGraphStore:
     """SQLite + sqlite-vec backed GraphStore.
 
@@ -333,6 +412,8 @@ class SqliteGraphStore:
                             "column": "coherence", "err": str(exc)[:200],
                         },
                     )
+            # groups: global `name UNIQUE` -> UNIQUE(name, domain, type)
+            _migrate_groups_unique(cur, self._conn)
             # Data Owner / Visibility columns (5 cols, 9 tables, idempotent)
             from k2g.security.data_owner import apply_data_owner_alters_sqlite
             apply_data_owner_alters_sqlite(cur)
