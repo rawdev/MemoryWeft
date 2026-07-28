@@ -3625,55 +3625,90 @@ async function doImport() {
     <div><span style="color:green">✓</span> ${t('imp.restoredOk')}</div>
     <pre>${escapeHtml(JSON.stringify(data.results, null, 2))}</pre>
   `;
-  await _impOfferDerivedRebuild(out, data);
+  await _impOfferRecompute(out, data);
 }
 
-// An archive exported with `include_derived=False` carries no event-jaccard
-// graph and no community assignments, so event auto-tags come up empty. Both
-// are rebuildable from the imported Tier-1 edges alone (no embeddings needed) —
-// but the Analysis panel only reaches Jaccard through the stopword [Apply]
-// pipeline, which aborts early when no checkbox changed. A freshly imported
-// project therefore has no reachable path, so offer it right here.
-async function _impOfferDerivedRebuild(out, data) {
+// A portable archive omits everything the target can regenerate: embeddings
+// (`include_vectors=False`) and the derived graph (`include_derived=False`).
+// Both gaps are silent and severe:
+//
+//   - No embeddings ⇒ search filters `embedding IS NOT NULL` first, so EVERY
+//     query returns zero hits with no error. This is the one that must not be
+//     skipped.
+//   - No jaccard/community ⇒ event auto-tags come up empty.
+//
+// Neither has a reachable repair path in the UI otherwise: there is no
+// standalone embed action, and Jaccard is only reached through the stopword
+// [Apply] pipeline, which aborts early when no checkbox changed — a freshly
+// imported project has nothing to toggle. So offer both right here.
+async function _impOfferRecompute(out, data) {
   const results = (data && data.results) || {};
   const rows = (tbl) => ((results[tbl] || {}).inserted || 0);
-  // Nothing to rebuild if the archive already carried the derived graph.
-  if (rows('event_jaccard_connected') > 0) return;
-  // Nothing to rebuild from, either — an empty graph needs no recompute.
+  // Nothing imported ⇒ nothing to recompute.
   if (rows('events') === 0 && rows('entities') === 0) return;
 
   const d = domain();
-  if (!d) { _impDerivedHint(out); return; }
+  if (!d) { _impRecomputeHint(out); return; }
 
-  if (!confirm(t('imp.derivedPrompt'))) { _impDerivedHint(out); return; }
+  // Only offer the embedding step when vectors are actually missing (an
+  // archive exported with vectors reports 0 here).
+  let missing = { events: 0, entities: 0 };
+  try {
+    const mr = await fetch(
+      `/api/train/embeddings/missing?domain=${encodeURIComponent(d)}`);
+    const mj = await mr.json();
+    if (mj && mj.missing) missing = mj.missing;
+  } catch (e) { /* probe is best-effort — fall through to the derived-only offer */ }
+
+  const needEmbed = (missing.events || 0) > 0 || (missing.entities || 0) > 0;
+  const needDerived = rows('event_jaccard_connected') === 0;
+  if (!needEmbed && !needDerived) return;
+
+  const prompt = needEmbed
+    ? t('imp.recomputePrompt', { ev: missing.events || 0, en: missing.entities || 0 })
+    : t('imp.derivedPrompt');
+  if (!confirm(prompt)) { _impRecomputeHint(out, needEmbed); return; }
 
   const status = document.createElement('div');
   status.className = 'muted';
   out.appendChild(status);
   try {
-    status.innerHTML = `<span class="sx-spinner"></span> ${t('an.run.jaccardStep')}`;
-    const jr = await _anRunJaccard(d, status);
-    if (jr.error) throw new Error(jr.error);
-    const eLR = await _anRunLeiden('entity', d, status, t('an.sw.step2'));
-    if (eLR.error) throw new Error(eLR.error);
-    const evLR = await _anRunLeiden('event', d, status, t('an.sw.step4'));
-    if (evLR.error) throw new Error(evLR.error);
-    status.innerHTML = `<span style="color:green">✓</span> ${t('imp.derivedDone')}`;
+    if (needEmbed) {
+      status.innerHTML = `<span class="sx-spinner"></span> ${t('imp.embedStep')}`;
+      const er = await fetch(
+        `/api/train/embeddings?domain=${encodeURIComponent(d)}`, { method: 'POST' });
+      const ej = await er.json();
+      if (ej.error) throw new Error(ej.error);
+      status.innerHTML = `<span class="sx-spinner"></span> ${t('imp.embedDone', {
+        ev: ej.events || 0, en: ej.entities || 0,
+      })}`;
+    }
+    if (needDerived) {
+      const jr = await _anRunJaccard(d, status);
+      if (jr.error) throw new Error(jr.error);
+      const eLR = await _anRunLeiden('entity', d, status, t('an.sw.step2'));
+      if (eLR.error) throw new Error(eLR.error);
+      const evLR = await _anRunLeiden('event', d, status, t('an.sw.step4'));
+      if (evLR.error) throw new Error(evLR.error);
+    }
+    status.innerHTML = `<span style="color:green">✓</span> ${t('imp.recomputeDone')}`;
   } catch (e) {
     status.innerHTML = `<span style="color:red">${t('imp.derivedFailed', {
       e: escapeHtml(String((e && e.message) || e)),
     })}</span>`;
-    _impDerivedHint(out);
+    _impRecomputeHint(out, needEmbed);
   }
 }
 
 // Shown when the user declines the rebuild or it fails — so the instructions
 // survive after the modal dialog is gone.
-function _impDerivedHint(out) {
+function _impRecomputeHint(out, needEmbed) {
   const box = document.createElement('div');
   box.className = 'muted';
   box.style.marginTop = '6px';
-  box.innerHTML = t('imp.derivedHint');
+  box.innerHTML = needEmbed
+    ? `${t('imp.embedHint')}<br>${t('imp.derivedHint')}`
+    : t('imp.derivedHint');
   out.appendChild(box);
 }
 
