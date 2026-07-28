@@ -150,6 +150,50 @@ def _all_cols() -> dict[str, tuple[str, ...]]:
     }
 
 
+def _archive_columns(
+    reader: ArchiveReader | DirReader, member: str,
+) -> tuple[str, ...] | None:
+    """Columns the archive actually carries for ``member`` (its ``$header``).
+
+    ``None`` when the member has no header or no rows — the caller then falls
+    back to the full schema list, which is the pre-header behavior.
+    """
+    try:
+        for header, _row in reader.iter_jsonl(member, with_header=True):
+            cols = (header or {}).get("columns")
+            return tuple(cols) if cols else None
+    except Exception:  # noqa: BLE001 — a malformed header must not kill the import
+        return None
+    return None
+
+
+def _effective_columns(
+    declared: tuple[str, ...],
+    reader: ArchiveReader | DirReader,
+    member: str,
+) -> tuple[str, ...]:
+    """Declared columns ∩ what the archive carries.
+
+    The exporter narrows each table to the columns that exist in the *source*
+    DB (``DomainExporter._present``), so an archive from an older/leaner schema
+    legitimately omits columns this schema declares. Binding ``None`` for those
+    defeats the target's DDL default and breaks NOT NULL columns — the observed
+    failure being ``NOT NULL constraint failed: groups.visibility`` when the
+    source's ``groups`` predates the owner-ACL columns.
+
+    Omitting the column from the INSERT instead lets the target apply its own
+    DEFAULT (``visibility TEXT NOT NULL DEFAULT 'public'``), which is what a
+    natively-created row would have got anyway.
+    """
+    archive = _archive_columns(reader, member)
+    if not archive:
+        return declared
+    narrowed = tuple(c for c in declared if c in archive)
+    # An archive with none of the declared columns is nonsense — fall back
+    # rather than emit `INSERT INTO t () VALUES ()`.
+    return narrowed or declared
+
+
 def _insert_sql(
     table: str,
     columns: tuple[str, ...],
@@ -649,7 +693,7 @@ class DomainImporter:
             for table, member, optional in IMPORT_ORDER:
                 if optional and not reader.has_member(member):
                     continue
-                cols = cols_map[table]
+                cols = _effective_columns(cols_map[table], reader, member)
                 count = self._bulk_insert(self._conn, table, cols, reader, member)
                 results[table]["inserted"] = count
                 logger.info("  restored %s: %d rows", table, count)
@@ -679,7 +723,9 @@ class DomainImporter:
         cs_conn = getattr(self._content_store, "_conn", None)
         if cs_conn is None:
             return
-        cols = _all_cols()["content_store"]
+        cols = _effective_columns(
+            _all_cols()["content_store"], reader, member,
+        )
         try:
             if wipe:
                 try:
@@ -941,7 +987,7 @@ class DomainImporter:
             for table, member, optional in IMPORT_ORDER:
                 if optional and not reader.has_member(member):
                     continue
-                cols = cols_map[table]
+                cols = _effective_columns(cols_map[table], reader, member)
                 pk_cols = TABLE_PKS[table]
                 sql = _insert_sql(table, cols, pk_cols, self._backend, strategy)
                 cur = self._conn.cursor()
@@ -1050,7 +1096,9 @@ class DomainImporter:
         if cs_conn is None:
             return
 
-        cols = _all_cols()["content_store"]
+        cols = _effective_columns(
+            _all_cols()["content_store"], reader, member,
+        )
         pk_cols = TABLE_PKS["content_store"]
         counts = _empty_counts()
         results["content_store"] = counts
