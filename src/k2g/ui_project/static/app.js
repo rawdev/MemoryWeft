@@ -3626,6 +3626,23 @@ async function doImport() {
     <pre>${escapeHtml(JSON.stringify(data.results, null, 2))}</pre>
   `;
   await _impOfferRecompute(out, data);
+  _impRestartNotice(out);
+}
+
+// A restore replaces the database under a process that has already cached
+// things derived from it (domain list, column layout, open handles). The rows
+// are on disk, but the running Manager keeps showing the pre-restore view —
+// which reads as "the import did nothing". Say so explicitly, and leave the
+// note in the panel so it survives the dialog.
+function _impRestartNotice(out) {
+  const box = document.createElement('div');
+  box.style.marginTop = '10px';
+  box.style.padding = '8px 10px';
+  box.style.border = '1px solid #d0a000';
+  box.style.borderRadius = '4px';
+  box.innerHTML = `<b>${t('imp.restartTitle')}</b><br>${t('imp.restartBody')}`;
+  out.appendChild(box);
+  alert(t('imp.restartAlert'));
 }
 
 // A portable archive omits everything the target can regenerate: embeddings
